@@ -120,12 +120,18 @@
       A.toast(`${what}에는 ${namesOf(found)} 캐릭터의 값이 들어 있어서 바꿀 수 없어요. 캐릭터 시트에서 값을 지우고 저장하면 바꿀 수 있어요.`, true);
       return false;
     }
-    const fieldGuard = f => fresh.has(f) || guard(fieldUsers(f.id), `"${f.label || f.id}" 칸`);
+    const fieldGuard = f => fresh.has(f) || guard([...new Set([f, ...(f.parts || [])].flatMap(x => fieldUsers(x.id)))], `"${labelOf(f)}" 칸`);
     const colGuard = (l, c) => fresh.has(c) || fresh.has(l) || guard(colUsers(l.id, c.id), `"${l.title}" 표의 "${c.label || c.id}" 열`);
     const listGuard = l => fresh.has(l) || guard(listUsers(l.id), `"${l.title || l.id}" 표`);
 
     // ---------- 이름 목록 / 이름 바꾸기 ----------
-    const allFields = () => draft.sections.filter(s => s.type !== 'list').flatMap(s => s.fields);
+    // 칸 + 칸에 붙은 추가 숫자(parts)까지 모두
+    const parentOf = new WeakMap();
+    const allFields = () => draft.sections.filter(s => s.type !== 'list').flatMap(s => s.fields.flatMap(f => {
+      for (const p of f.parts || []) parentOf.set(p, f);
+      return [f, ...(f.parts || [])];
+    }));
+    const labelOf = x => (parentOf.has(x) ? `${parentOf.get(x).label || parentOf.get(x).id} ${x.label || ''}`.trim() : (x.label || x.id));
     const allLists = () => draft.sections.filter(s => s.type === 'list');
     function eachFormula(fn) {
       for (const f of allFields()) {
@@ -327,7 +333,7 @@
         group('기호', OPS.map(o => chip(OP_LABEL[o] || o, OP_TIP[o] || '', () => insert(o === '(' || o === ')' ? o : ` ${o} `), 'op'))),
         ctx.list ? group('같은 줄', ctx.list.columns.filter(c => c.id && c !== ctx.col)
           .map(c => chip(c.label || c.id, `수식 이름: ${c.id}`, () => insert(c.id), 'ref'))) : null,
-        group('칸', fields.map(f => chip(f.label || f.id, `수식 이름: ${f.id}`, () => insert(f.id), 'ref'))),
+        group('칸', fields.map(f => chip(labelOf(f), `수식 이름: ${f.id}`, () => insert(f.id), 'ref'))),
         group('표', listChips),
         h('p', { class: 'fx-tip' }, '수식을 쓰는 중에 미리보기의 칸을 클릭해도 그 칸이 들어가요. 체크 칸은 체크하면 1, 아니면 0이에요.'),
       ].filter(Boolean));
@@ -377,6 +383,7 @@
           h('div', { class: 'mini-field grow' }, h('span', {}, '최대값 표시 (선택, 수식 가능)'),
             formulaInput(f, 'max', { field: f, prop: 'max', optional: true }, '예: 최대체력'))));
       }
+      if (kind === 'number' || kind === 'formula') extra.push(partsEditor(f));
       if (kind === 'text' || kind === 'textarea') {
         extra.push(h('label', { class: 'mini-field' }, h('span', {}, '처음 값'),
           h('input', { value: f.default ?? '', oninput: e => { if (e.target.value) f.default = e.target.value; else delete f.default; changed(); } })));
@@ -393,7 +400,15 @@
       }
       return h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') },
         h('div', { class: 'item-head' }, label,
-          kindSelect(KINDS, kind, v => { if (v === 'formula' && !fieldGuard(f)) return drawEditor(); applyKind(f, v); changed(); drawEditor(); }),
+          kindSelect(KINDS, kind, v => {
+            if (v === 'formula' && !fieldGuard(f)) return drawEditor();
+            if (v !== 'number' && v !== 'formula' && (f.parts || []).length) {
+              if (!(f.parts || []).every(p => partGuard(p))) return drawEditor();
+              if (!confirm('글자·체크 같은 칸에는 숫자를 붙일 수 없어서, 붙여 둔 숫자가 지워져요. 바꿀까요?')) return drawEditor();
+              delete f.parts; delete f.sep; delete f.mainLabel;
+            }
+            applyKind(f, v); changed(); drawEditor();
+          }),
           moveBtns(s.fields, i),
           iconBtn('×', '칸 삭제', () => { if (!fieldGuard(f)) return; s.fields.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         extra,
@@ -404,6 +419,64 @@
               h('input', { value: f.hint || '', oninput: e => { if (e.target.value) f.hint = e.target.value; else delete f.hint; changed(); } })),
             h('label', { class: 'mini-check' }, h('input', { type: 'checkbox', checked: !!f.wide,
               onchange: e => { if (e.target.checked) f.wide = true; else delete f.wide; changed(); } }), '가로로 넓게'))));
+    }
+
+    // ---------- 한 칸에 숫자 여러 개 (예: 보통 / 절반 / 1/5) ----------
+    const PART_KINDS = [['number', '숫자'], ['formula', '자동 계산']];
+    const partGuard = p => fresh.has(p) || guard(fieldUsers(p.id), `"${labelOf(p)}" 숫자`);
+    function partsEditor(f) {
+      const parts = f.parts || [];
+      const takenIds = p => () => new Set(allFields().filter(x => x !== p).map(x => x.id));
+      const rows = parts.map((p, j) => {
+        const pk = p.formula !== undefined ? 'formula' : 'number';
+        const idOut = { el: null };
+        const nameIn = h('input', { class: 'label-input', value: p.label || '', placeholder: '이름 (예: 절반)', oninput: e => {
+          p.label = e.target.value;
+          if (fresh.has(p) && !manual.has(p)) { renameField(p, idFrom((f.label || f.id) + e.target.value, takenIds(p)())); if (idOut.el) idOut.el.value = p.id; }
+          changed();
+        } });
+        if (focusTarget === p) requestAnimationFrame(() => { nameIn.focus(); nameIn.select(); focusTarget = null; });
+        return h('div', { class: 'part-item' },
+          h('div', { class: 'item-head' }, h('span', { class: 'part-sep' }, f.sep || '/'), nameIn,
+            kindSelect(PART_KINDS, pk, v => {
+              if (v === 'formula' && !partGuard(p)) return drawEditor();
+              applyKind(p, v); changed(); drawEditor();
+            }),
+            moveBtns(parts, j),
+            iconBtn('×', '이 숫자 빼기', () => {
+              if (!partGuard(p)) return;
+              parts.splice(j, 1);
+              if (!parts.length) { delete f.parts; delete f.sep; delete f.mainLabel; }
+              changed(); drawEditor();
+            }, 'danger')),
+          pk === 'formula'
+            ? formulaInput(p, 'formula', { field: p, prop: 'formula' }, `예: 내림(${f.id} / 2)`)
+            : h('label', { class: 'mini-field' }, h('span', {}, '처음 값'),
+              h('input', { type: 'number', value: p.default ?? '', oninput: e => {
+                if (e.target.value === '') delete p.default; else p.default = Number(e.target.value);
+                delete preview.values[p.id]; changed();
+              } })),
+          h('details', { class: 'more' }, h('summary', {}, '더보기'),
+            idEditor(p, idOut, '수식에서 부르는 이름', v => renameField(p, v), takenIds(p), () => partGuard(p))));
+      });
+      return h('div', { class: 'parts-box' },
+        parts.length ? h('div', { class: 'row tight' },
+          h('label', { class: 'mini-field' }, h('span', {}, '첫 숫자 이름 (선택)'),
+            h('input', { value: f.mainLabel || '', placeholder: '예: 보통', oninput: e => { if (e.target.value) f.mainLabel = e.target.value; else delete f.mainLabel; changed(); } })),
+          h('label', { class: 'mini-field' }, h('span', {}, '숫자 사이 기호'),
+            h('input', { value: f.sep || '/', style: 'width:64px', oninput: e => {
+              if (e.target.value && e.target.value !== '/') f.sep = e.target.value; else delete f.sep;
+              changed();
+              for (const el of e.target.closest('.parts-box').querySelectorAll('.part-sep')) el.textContent = f.sep || '/';
+            } }))) : null,
+        rows,
+        h('button', { type: 'button', class: 'add-row small-btn', onclick: () => {
+          const p = { label: parts.length ? '' : '절반', formula: parts.length ? '' : `내림(${f.id} / 2)` };
+          p.id = idFrom((f.label || f.id) + (p.label || '숫자'), new Set(allFields().map(x => x.id)));
+          fresh.add(p);
+          f.parts = [...parts, p];
+          focusTarget = p; changed(); drawEditor();
+        } }, parts.length ? '+ 숫자 하나 더' : '+ 이 칸에 숫자 더 붙이기 (예: 보통 / 절반 / 1/5)'));
     }
 
     // ---------- 표의 열 한 줄 편집 ----------
@@ -607,7 +680,7 @@
           h('span', { class: 'fx-title' }, '넣기'),
           chip('캐릭터 이름', '{#이름}', () => ins('{#이름}'), 'fn'),
           l ? l.columns.filter(c => c.id).map(c => chip(`${c.label || c.id} (같은 줄)`, `{${c.id}}`, () => ins(`{${c.id}}`), 'ref')) : [],
-          allFields().filter(f => f.id).map(f => chip(f.label || f.id, `{${f.id}}`, () => ins(`{${f.id}}`), l ? '' : 'ref')),
+          allFields().filter(f => f.id).map(f => chip(labelOf(f), `{${f.id}}`, () => ins(`{${f.id}}`), l ? '' : 'ref')),
           h('span', { class: 'fx-tip' }, '{ } 안에는 수식도 쓸 수 있어요. 예: {근력 * 5}'),
         ].flat());
         chips.hidden = false;
@@ -790,6 +863,11 @@
           if (x.formula !== undefined) { delete x.type; delete x.default; delete x.max; delete x.options; }
           if (x.max !== undefined && !String(x.max).trim()) delete x.max;
           if (!x.wide) delete x.wide;
+          for (const pt of x.parts || []) {
+            if (pt.formula !== undefined) { delete pt.type; delete pt.default; } else pt.type = 'number';
+            if (!pt.label) delete pt.label;
+          }
+          if (x.parts && !x.parts.length) delete x.parts;
         }
         if (s.type === 'list') {
           s.defaultRows = (s.defaultRows || []).filter(row => Object.keys(row).length);

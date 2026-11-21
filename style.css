@@ -439,3 +439,21 @@ h1.sheet-name { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .reading .sheet .field > span { color: var(--muted); }
 input[readonly]::placeholder, textarea[readonly]::placeholder { color: var(--muted); opacity: .6; }
 .with-max input[readonly] { width: 5em; flex: none; }
+
+/* ================= 한 칸에 숫자 여러 개 ================= */
+.fields.grid .field.has-parts { grid-column: span 2; }
+.multi-num { display: flex; align-items: flex-start; gap: 6px; }
+.multi-num .part { flex: 1 1 0; min-width: 0; display: grid; gap: 2px; }
+.multi-num .part > small { font-size: 11px; color: var(--muted); text-align: center; }
+.multi-num .part input { text-align: center; min-width: 0; }
+.multi-num .part output.computed { min-width: 0; }
+.multi-num .part .with-max { gap: 4px; }
+.multi-num .part-sep { color: var(--muted); padding-top: 9px; }
+.fields.stack .field .multi-num { max-width: 420px; }
+.fields.stack .field .multi-num .part input[type="number"] { max-width: none; }
+.reading .sheet .multi-num .part input[readonly] { padding-left: 0; }
+@media (max-width: 600px) { .fields.grid .field.has-parts { grid-column: 1 / -1; } }
+.parts-box { display: grid; gap: 6px; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.part-item { display: grid; gap: 6px; padding: 6px 0 6px 6px; border-left: 2px solid var(--line); }
+.part-item .part-sep { color: var(--muted); font-weight: 700; padding: 0 2px; }
+.parts-box .add-row { margin-top: 0; }

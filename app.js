@@ -171,9 +171,9 @@
     for (const s of template.sections || []) {
       if (s.type === 'list') {
         if (sheet.lists[s.id] === undefined) sheet.lists[s.id] = (s.defaultRows || []).map(r => ({ ...r }));
-      } else for (const f of s.fields || []) {
-        if (f.formula !== undefined || sheet.values[f.id] !== undefined) continue;
-        if (f.default !== undefined) sheet.values[f.id] = f.default;
+      } else for (const f of s.fields || []) for (const x of [f, ...(f.parts || [])]) {
+        if (x.formula !== undefined || sheet.values[x.id] !== undefined) continue;
+        if (x.default !== undefined) sheet.values[x.id] = x.default;
       }
     }
     return sheet;
@@ -1071,7 +1071,19 @@
           control = h('div', { class: 'with-max' }, control, h('span', { class: 'slash' }, '/'), maxOut);
         }
       }
-      const cls = ['field', f.formula ? 'is-computed' : '', f.type === 'checkbox' ? 'is-check' : '', f.wide ? 'wide' : ''].join(' ');
+      // 한 칸에 숫자 여러 개: [첫 숫자] / [붙인 숫자] / …  (붙인 숫자도 직접 입력 또는 수식)
+      const parts = (f.type === 'number' || f.formula !== undefined) ? (f.parts || []) : [];
+      if (parts.length) {
+        const sep = () => h('span', { class: 'part-sep' }, f.sep || '/');
+        const cell = (x, ctrl, sub) => h('div', { class: 'part', 'data-ref': x.id }, ctrl, sub ? h('small', {}, sub) : null);
+        control = h('div', { class: 'multi-num' },
+          cell(f, control, f.mainLabel),
+          parts.flatMap(p => [sep(), cell(p,
+            p.formula !== undefined ? computedCell(r => r.get(p.id))
+              : input('number', sheet.values[p.id], v => { sheet.values[p.id] = v; }),
+            p.label)]));
+      }
+      const cls = ['field', f.formula ? 'is-computed' : '', f.type === 'checkbox' ? 'is-check' : '', f.wide ? 'wide' : '', parts.length ? 'has-parts' : ''].join(' ');
       return h('label', { class: cls, 'data-ref': f.id }, h('span', {}, f.label || f.id), control,
         f.hint ? h('small', { class: 'muted' }, f.hint) : null);
     }

@@ -172,7 +172,10 @@
     const fields = {}, lists = {};
     for (const s of template.sections || []) {
       if (s.type === 'list') lists[s.id] = s;
-      else for (const f of s.fields || []) fields[f.id] = f;
+      else for (const f of s.fields || []) {
+        fields[f.id] = f;
+        for (const p of f.parts || []) fields[p.id] = p; // 한 칸에 붙은 추가 숫자도 각자 이름으로 부를 수 있음
+      }
     }
     const values = sheet.values || {};
     const rowsOf = id => (sheet.lists && sheet.lists[id]) || [];
@@ -235,7 +238,7 @@
   const TEXT_TYPES = ['text', 'textarea', 'select', 'image'];
   function fillText(text, r, template, sheet, row, warn) {
     const fields = {};
-    for (const s of template.sections || []) for (const f of s.fields || []) fields[f.id] = f;
+    for (const s of template.sections || []) for (const f of s.fields || []) { fields[f.id] = f; for (const p of f.parts || []) fields[p.id] = p; }
     const cols = {};
     if (row) {
       const l = (template.sections || []).find(s => s.type === 'list' && s.id === row.listId);
@@ -260,7 +263,7 @@
         .map(f => ({ label: f.label || f.id, value: f.id, max: String(f.max) })),
       params: fields.filter(f => (f.type === 'number' && f.max == null) || f.formula !== undefined)
         .filter(f => !maxRefs.has(f.id))
-        .map(f => ({ label: f.label || f.id, value: `{${f.id}}` })),
+        .map(f => ({ label: f.label || f.id, value: [f, ...(f.parts || [])].map(x => `{${x.id}}`).join(f.sep || '/') })),
       initiative: '',
       commands: '',
       listCommands: [],
