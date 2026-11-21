@@ -1012,6 +1012,7 @@
 
 
   // ---------------- 시트 그리기 (모든 룰 공통) ----------------
+  const openFolds = new WeakSet(); // 펼쳐 둔 "숨긴 칸"은 다시 그려도 펼친 채로
   function renderSheet(template, sheet, { readonly, onChange, accent, datasets }) {
     sheet.values = sheet.values || {};
     sheet.lists = sheet.lists || {};
@@ -1154,7 +1155,17 @@
       return card;
     });
     for (const [card, s] of fieldSections) {
-      card.append(h('div', { class: 'fields ' + (s.layout === 'stack' ? 'stack' : 'grid') }, (s.fields || []).map(renderField)));
+      const layout = 'fields ' + (s.layout === 'stack' ? 'stack' : 'grid');
+      const shown = (s.fields || []).filter(f => !f.folded), folded = (s.fields || []).filter(f => f.folded);
+      if (shown.length) card.append(h('div', { class: layout }, shown.map(renderField)));
+      // 접힌 칸: 편집할 때만 "숨긴 칸 보기"로 펼쳐서 입력, 읽기·공유 화면에서는 안 보임
+      if (folded.length && !readonly) {
+        const det = h('details', { class: 'folded-fields', open: openFolds.has(s),
+          ontoggle: e => { if (e.target.open) openFolds.add(s); else openFolds.delete(s); } },
+          h('summary', {}, `숨긴 칸 ${folded.length}개 보기`), h('div', { class: layout }, folded.map(renderField)));
+        card.append(det);
+      }
+      if (readonly && !shown.length) card.hidden = true;
     }
     const baseUpdaters = updaters.length;
     for (const [card, s] of listSections) card.append(renderList(s));

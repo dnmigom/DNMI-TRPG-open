@@ -398,8 +398,8 @@
             f.options = e.target.value.split(',').map(x => x.trim()).filter(Boolean); changed();
           } })));
       }
-      return h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') },
-        h('div', { class: 'item-head' }, label,
+      const item = h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') + (f.folded ? ' is-folded' : '') },
+        h('div', { class: 'item-head' }, dragHandle(), label,
           kindSelect(KINDS, kind, v => {
             if (v === 'formula' && !fieldGuard(f)) return drawEditor();
             if (v !== 'number' && v !== 'formula' && (f.parts || []).length) {
@@ -409,8 +409,13 @@
             }
             applyKind(f, v); changed(); drawEditor();
           }),
+          iconBtn(f.folded ? '🙈' : '👁', f.folded ? '접어 둔 칸이에요 (시트에서 평소엔 숨김). 눌러서 다시 보이게' : '시트에서 접어 두기 (평소엔 숨김)', () => {
+            if (f.folded) delete f.folded; else f.folded = true; changed(); drawEditor();
+          }, 'fold-btn' + (f.folded ? ' on' : '')),
+          iconBtn('⧉', '이 칸 복제', () => duplicateField(s, i)),
           moveBtns(s.fields, i),
           iconBtn('×', '칸 삭제', () => { if (!fieldGuard(f)) return; s.fields.splice(i, 1); changed(); drawEditor(); }, 'danger')),
+        f.folded ? h('span', { class: 'fold-tag' }, '🙈 접힌 칸 — 시트에서는 "숨긴 칸 보기"를 눌러야 보이고, 읽기 모드·공유 화면에서는 안 보여요. 수식에서는 그대로 쓸 수 있어요.') : null,
         extra,
         h('details', { class: 'more' }, h('summary', {}, '더보기'),
           h('div', { class: 'row tight' },
@@ -419,6 +424,114 @@
               h('input', { value: f.hint || '', oninput: e => { if (e.target.value) f.hint = e.target.value; else delete f.hint; changed(); } })),
             h('label', { class: 'mini-check' }, h('input', { type: 'checkbox', checked: !!f.wide,
               onchange: e => { if (e.target.checked) f.wide = true; else delete f.wide; changed(); } }), '가로로 넓게'))));
+      enableDrag(item, f);
+      return item;
+    }
+
+    // ---------- 칸 복제 (붙은 숫자까지, 수식 안의 자기 이름도 새 이름으로) ----------
+    function duplicateField(s, i) {
+      const src = s.fields[i];
+      const copy = clone(src);
+      const taken = new Set(allFields().map(x => x.id));
+      copy.label = (src.label || src.id) + ' 사본';
+      const map = new Map();
+      copy.id = idFrom(copy.label, taken); taken.add(copy.id); map.set(src.id, copy.id);
+      for (const p of copy.parts || []) {
+        const nid = idFrom(copy.label + (p.label || '숫자'), taken); taken.add(nid); map.set(p.id, nid); p.id = nid;
+      }
+      const remap = f => { let out = f; for (const [o, n] of map) out = replaceIdent(out, o, n); return out; };
+      for (const x of [copy, ...(copy.parts || [])]) {
+        if (x.formula !== undefined) x.formula = remap(x.formula);
+        if (typeof x.max === 'string') x.max = remap(x.max);
+        fresh.add(x);
+      }
+      s.fields.splice(i + 1, 0, copy);
+      focusTarget = copy; changed(); drawEditor();
+    }
+
+    // ---------- 길게 눌러 끌어서 칸 옮기기 (다른 칸 묶음으로도) ----------
+    const dragHandle = () => h('span', { class: 'drag-handle', title: '꾹 누른 채로 끌어서 옮기기' }, '⠿');
+    function enableDrag(item, f) {
+      item.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        const onHandle = !!e.target.closest('.drag-handle');
+        if (!onHandle && (e.pointerType === 'touch' || e.target.closest('input, textarea, select, button, a, summary, .formula-wrap, .formula-helper, .parts-box'))) return;
+        const sx = e.clientX, sy = e.clientY;
+        let timer = setTimeout(() => { timer = null; stop(); startDrag(item, f, sx, sy, e.pointerId); }, onHandle ? 150 : 350);
+        const move = ev => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) stop(); };
+        function stop() {
+          if (timer) clearTimeout(timer);
+          timer = null;
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', stop);
+          window.removeEventListener('pointercancel', stop);
+        }
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', stop);
+        window.addEventListener('pointercancel', stop);
+      });
+    }
+    function startDrag(item, f, x0, y0, pointerId) {
+      const rect = item.getBoundingClientRect();
+      const ghost = item.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      Object.assign(ghost.style, { width: rect.width + 'px', left: rect.left + 'px', top: rect.top + 'px' });
+      document.body.append(ghost);
+      item.classList.add('drag-source');
+      document.body.classList.add('dragging');
+      const marker = h('div', { class: 'drop-marker' });
+      let target = null;
+      const dx = x0 - rect.left, dy = y0 - rect.top;
+      let lastX = x0, lastY = y0, raf = 0;
+      function update() {
+        ghost.style.left = (lastX - dx) + 'px';
+        ghost.style.top = (lastY - dy) + 'px';
+        const el = document.elementFromPoint(lastX, lastY);
+        const list = el && el.closest('.field-list');
+        if (!list) { marker.remove(); target = null; return; }
+        const items = [...list.children].filter(c => c.classList.contains('tpl-item') && c !== item);
+        let idx = items.findIndex(c => { const r = c.getBoundingClientRect(); return lastY < r.top + r.height / 2; });
+        if (idx < 0) idx = items.length;
+        if (idx < items.length) list.insertBefore(marker, items[idx]); else list.append(marker);
+        target = { sec: Number(list.dataset.sec), idx };
+      }
+      // 화면 위·아래 가장자리에 대고 있으면 계속 스크롤 (멀리 있는 칸 묶음으로 옮길 때)
+      function edgeScroll() {
+        const edge = 70, h = window.innerHeight;
+        const speed = lastY < edge ? -Math.ceil((edge - lastY) / 4) : lastY > h - edge ? Math.ceil((lastY - (h - edge)) / 4) : 0;
+        if (speed) { window.scrollBy(0, speed); update(); }
+        raf = requestAnimationFrame(edgeScroll);
+      }
+      raf = requestAnimationFrame(edgeScroll);
+      function onMove(ev) {
+        ev.preventDefault();
+        lastX = ev.clientX; lastY = ev.clientY;
+        update();
+      }
+      const onScroll = () => update();
+      window.addEventListener('scroll', onScroll, { passive: true });
+      function onUp() {
+        cancelAnimationFrame(raf);
+        window.removeEventListener('scroll', onScroll);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        ghost.remove(); marker.remove();
+        item.classList.remove('drag-source');
+        document.body.classList.remove('dragging');
+        if (!target) return;
+        const from = draft.sections.find(s => s.type !== 'list' && s.fields.includes(f));
+        const to = draft.sections[target.sec];
+        if (!from || !to || to.type === 'list') return;
+        const oldIdx = from.fields.indexOf(f);
+        from.fields.splice(oldIdx, 1);
+        to.fields.splice(Math.min(target.idx, to.fields.length), 0, f);
+        if (from !== to || oldIdx !== target.idx) { changed(); }
+        drawEditor();
+      }
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
     }
 
     // ---------- 한 칸에 숫자 여러 개 (예: 보통 / 절반 / 1/5) ----------
@@ -490,6 +603,13 @@
         fromField ? h('span', { class: 'link-tag' }, (ds.fields[0].id === c.from ? '🔎 찾기 이름 · ' : '🔗 ') + `${ds.name}의 "${fromField.label || fromField.id}"`) : null,
         h('div', { class: 'item-head' }, label,
           kindSelect(COL_KINDS, kind, v => { if (v === 'formula' && !colGuard(l, c)) return drawEditor(); applyKind(c, v); changed(); drawEditor(); }),
+          iconBtn('⧉', '이 열 복제', () => {
+            const copy = clone(c);
+            delete copy.from;
+            copy.label = (c.label || c.id) + ' 사본';
+            copy.id = idFrom(copy.label, new Set(l.columns.map(x => x.id)));
+            fresh.add(copy); l.columns.splice(i + 1, 0, copy); focusTarget = copy; changed(); drawEditor();
+          }),
           moveBtns(l.columns, i),
           iconBtn('×', '열 삭제', () => { if (!colGuard(l, c)) return; l.columns.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         kind === 'formula' ? formulaInput(c, 'formula', { list: l, col: c, prop: 'formula' }, '예: 기본 + 투자') : null,
@@ -646,7 +766,8 @@
         ];
       } else {
         body = [
-          s.fields.map((f, j) => fieldItem(f, s, j)),
+          h('div', { class: 'field-list', 'data-sec': String(i) }, s.fields.map((f, j) => fieldItem(f, s, j)),
+            s.fields.length ? null : h('p', { class: 'muted small empty-drop' }, '칸이 없어요. 다른 묶음의 칸을 끌어다 놓을 수도 있어요.')),
           h('button', { type: 'button', class: 'add-row', onclick: () => {
             const f = { label: '새 칸', type: 'number' };
             f.id = idFrom('새칸', new Set(allFields().map(x => x.id)));
