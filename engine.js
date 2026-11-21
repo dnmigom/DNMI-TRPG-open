@@ -273,7 +273,7 @@
       get(id) {
         if (cache.has(id)) return cache.get(id);
         const f = fields[id];
-        if (!f) throw new Error(`'${id}'라는 칸이 없어요`);
+        if (!f) throw new Error(`'${id}'라는 칸이 없어요. 글자로 쓰려던 거라면 "${id}"처럼 따옴표로 감싸 주세요`);
         const v = f.formula ? guarded(id, () => evaluate(f.formula, ctx))
           : TEXTY.includes(f.type) ? String(values[id] ?? '') // 글자 칸은 글자 그대로 (계산할 땐 숫자로 바뀜)
           : toNumber(values[id]);
@@ -346,14 +346,46 @@
       const l = (template.sections || []).find(s => s.type === 'list' && s.id === row.listId);
       for (const c of (l && l.columns) || []) cols[c.id] = c;
     }
-    return String(text || '').replace(/\{([^{}]+)\}/g, (m, expr) => {
+    return mapBraces(text, expr => {
       expr = expr.trim();
       if (expr === '#이름') return sheet.name || '';
       if (row && cols[expr] && cols[expr].formula === undefined && TEXT_TYPES.includes(cols[expr].type || 'text')) return String(row.data[expr] ?? '');
       if (!(row && cols[expr]) && fields[expr] && fields[expr].formula === undefined && TEXT_TYPES.includes(fields[expr].type || 'text')) return String((sheet.values || {})[expr] ?? '');
-      try { return format(row ? r.rowEvaluate(row.listId, row.i, expr) : r.evaluate(expr)); }
+      // 안쪽에 또 { }가 있으면 괄호로 바꿔서 하나의 수식으로 계산: {잇기({만약(…)}, …)} 도 됨
+      const inner = bracesToParens(expr);
+      try { return format(row ? r.rowEvaluate(row.listId, row.i, inner) : r.evaluate(inner)); }
       catch (e) { warn(`{${expr}}: ${e.message}`); return '?'; }
     });
+  }
+
+  // 글 안의 { … }를 바깥쪽 것부터 짝을 맞춰 찾아서 fn(안쪽 글)로 바꿈 (따옴표 안의 { }는 글자로 취급)
+  function mapBraces(text, fn) {
+    const s = String(text || '');
+    let out = '', i = 0;
+    while (i < s.length) {
+      if (s[i] !== '{') { out += s[i++]; continue; }
+      let depth = 0, j = i, q = null;
+      for (; j < s.length; j++) {
+        const c = s[j];
+        if (q) { if (c === q) q = null; continue; }
+        if (c === '"' || c === "'") { if (depth > 0) q = c; continue; }
+        if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) break;
+      }
+      if (j >= s.length) { out += s.slice(i); break; } // 닫는 }가 없으면 그대로 둠
+      out += fn(s.slice(i + 1, j));
+      i = j + 1;
+    }
+    return out;
+  }
+  function bracesToParens(expr) {
+    let out = '', q = null;
+    for (const c of expr) {
+      if (q) { out += c; if (c === q) q = null; continue; }
+      if (c === '"' || c === "'") { q = c; out += c; continue; }
+      out += c === '{' ? '(' : c === '}' ? ')' : c;
+    }
+    return out;
   }
 
   // 연동 설정이 없는 룰 틀은 자동으로 추측: 최대값이 있는 숫자 칸 → 상태, 나머지 숫자·계산 칸 → 파라미터
@@ -475,7 +507,7 @@
   }
 
   const api = { parse, evaluate, makeResolver, format, toNumber, toCcfolia, autoCcfolia, computeGrid, gridState, gridFind,
-    linkInfo, fillRowFromEntry, syncLinkedRows, sourceKeys, sameSchema, schemaDiff };
+    linkInfo, fillRowFromEntry, syncLinkedRows, sourceKeys, sameSchema, schemaDiff, mapBraces };
   global.SheetEngine = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

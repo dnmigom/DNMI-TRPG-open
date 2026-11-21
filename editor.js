@@ -145,7 +145,7 @@
       for (const l of allLists()) for (const c of l.columns) if (c.formula !== undefined) c.formula = fn(c.formula, l);
       const cc = draft.ccfolia;
       if (cc) {
-        const inText = (t, list) => String(t || '').replace(/\{([^{}]+)\}/g, (m, e) => (e.trim().startsWith('#') ? m : `{${fn(e, list)}}`));
+        const inText = (t, list) => E.mapBraces(t, e => (e.trim().startsWith('#') ? `{${e}}` : `{${fn(e, list)}}`));
         for (const st of cc.status || []) {
           if (st.value != null) st.value = fn(String(st.value), null);
           if (st.max != null) st.max = fn(String(st.max), null);
