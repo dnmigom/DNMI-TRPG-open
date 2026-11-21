@@ -6,7 +6,7 @@
  */
 (function () {
   'use strict';
-  const A = window.SheetApp, h = A.h;
+  const A = window.SheetApp, E = window.SheetEngine, h = A.h;
   const TYPES = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글'], ['select', '선택 목록']];
   const clone = o => JSON.parse(JSON.stringify(o));
   const validId = id => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(id || '');
@@ -24,8 +24,9 @@
   // 이 데이터를 연결해서 쓰는 룰 틀들 → [{ key, rule, columns: [{ from, label }] }]
   function templatesUsing(templates, dsKey) {
     return Object.entries(templates).flatMap(([k, t]) => (t.sections || [])
-      .filter(s => s.type === 'list' && s.source && s.source.dataset === dsKey)
-      .map(s => ({ key: k, rule: t.rule || k, table: s.title || s.id, from: (s.columns || []).filter(c => c.from).map(c => c.from) })));
+      .filter(s => s.type === 'list' && E.sourceKeys(s).includes(dsKey))
+      .map(s => ({ key: k, rule: t.rule || k, table: s.title || s.id, from: (s.columns || []).filter(c => c.from).map(c => c.from),
+        partners: E.sourceKeys(s).filter(x => x !== dsKey) })));
   }
 
   // ================= 목록 =================
@@ -301,6 +302,11 @@
         (blank ? `${draft.fields[0].label || '이름'}이 비어 있는 줄이 ${blank}개 있어요. 이런 줄은 룰 틀에서 불러올 수 없어요.\n` : '') +
         (dup.length ? `같은 ${draft.fields[0].label || '이름'}이 여러 번 있어요: ${[...new Set(dup)].slice(0, 5).join(', ')}. 맨 위의 것만 불러와져요.\n` : '') +
         '그래도 저장할까요?')) return;
+      // 같은 표에 함께 연결된 데이터와 항목 구성이 달라지면 알려 줌
+      const partnerKeys = [...new Set(usedBy.flatMap(u => u.partners || []))];
+      const off = partnerKeys.filter(k => datasets[k] && !E.sameSchema(draft, datasets[k]));
+      if (off.length && !confirm(`이 데이터는 ${off.map(k => `"${datasets[k].name || k}"`).join(', ')}와(과) 같은 표에 함께 연결돼 있는데, 항목 구성이 서로 달라져요.\n` +
+        '구성이 다른 데이터는 그 표에서 불러오지 않게 돼요. 함께 쓰는 데이터도 똑같이 고쳐 주세요.\n\n그래도 저장할까요?')) return;
       let saveKey = key;
       if (isNew) {
         saveKey = A.fileKey(`${draft.rule || '공용'}-${draft.name}`);
@@ -358,7 +364,8 @@
                 h('input', { value: draft.name || '', placeholder: '예: 스킬, 아이템, 주문', oninput: e => { draft.name = e.target.value; changed(); updateFile(); } })),
               h('label', { class: 'mini-field' }, h('span', {}, '룰'), ruleSelect)),
             fileLabel,
-            usedBy.length ? h('p', { class: 'muted small' }, '연결된 룰 틀: ' + usedBy.map(u => `${u.rule}의 "${u.table}" 표`).join(', ')) : null),
+            usedBy.length ? h('p', { class: 'muted small' }, '연결된 룰 틀: ' + usedBy.map(u => `${u.rule}의 "${u.table}" 표` +
+              (u.partners && u.partners.length ? ` (함께: ${u.partners.map(k => (datasets[k] && datasets[k].name) || k).join(', ')})` : '')).join(', ')) : null),
           schemaCard),
         h('section', { class: 'card data-table-card' },
           h('div', { class: 'toolbar tight' }, h('strong', {}, '데이터'), countLabel, search,

@@ -608,3 +608,12 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 table.list tfoot .quick-add td { padding-top: 6px; border-top: 1px dashed var(--line); }
 .quick-add-input { border-style: dashed; background: transparent; }
 .quick-add-input:focus { background: var(--field); }
+
+/* ================= 한 표에 여러 데이터 ================= */
+.also-box { display: grid; gap: 6px; }
+.also-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.also-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border-radius: 99px; font-size: 13px;
+  border: 1px solid var(--accent); background: var(--card); }
+.also-chip button { padding: 2px 6px; }
+.also-chip.bad { border-color: var(--danger); color: var(--danger); }
+.also-box select { width: auto; max-width: 100%; }

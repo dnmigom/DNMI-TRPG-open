@@ -108,11 +108,14 @@
     // 목록(표) 함수: total("목록id", "열id"), count("목록id")
     total: (ev, a, ctx) => ctx.column(String(ev(a[0])), String(ev(a[1]))).reduce((s, v) => s + num(v), 0),
     count: (ev, a, ctx) => ctx.count(String(ev(a[0]))),
+    // 특기표: target("표id", "특기 이름") → 달성치, learned("표id", "특기 이름") → 습득했으면 1
+    target: (ev, a, ctx) => ctx.grid(String(ev(a[0])), String(ev(a[1]))).value,
+    learned: (ev, a, ctx) => (ctx.grid(String(ev(a[0])), String(ev(a[1]))).learned ? 1 : 0),
   };
   const ALIAS = {
     내림: 'floor', 올림: 'ceil', 반올림: 'round', 버림: 'trunc', 절댓값: 'abs',
     최소: 'min', 최대: 'max', 합: 'sum', 합계: 'sum', 범위: 'clamp', 만약: 'if',
-    목록합계: 'total', 개수: 'count',
+    목록합계: 'total', 개수: 'count', 달성치: 'target', 습득: 'learned',
   };
 
   function evalAst(node, ctx) {
@@ -160,6 +163,59 @@
     return evalAst(ast, ctx);
   }
 
+  // ---------- 3-1. 특기표(격자) ----------
+  // section: { type: 'grid', id, columns: [열 이름], rows: [줄 이름], cells: [[특기 이름]] (줄 × 열),
+  //            base(습득한 칸의 달성치, 기본 5), empty(아무것도 없을 때, 기본 12), cap(최대, 기본 12, 0이면 제한 없음),
+  //            rowCost(위아래 한 칸, 기본 1), colCost(옆 열로 한 칸, 기본 1), gapCost(열 사이 빈 줄, 기본 1) }
+  // state:   { acquired: ["줄-열", …], blackout: 열 번호 | null, disabled: [열 번호, …] }
+  //   blackout: 고른 열의 양쪽 빈 줄을 검게 칠해 무효화 (맨 왼쪽·맨 오른쪽 열은 한쪽만)
+  //   disabled: 그 열의 습득을 모두 없는 것으로 취급
+  function gridNum(v, d) { const n = Number(v); return v === undefined || v === null || v === '' || Number.isNaN(n) ? d : n; }
+  function gridState(section, sheet) {
+    const st = (sheet && sheet.grids && sheet.grids[section.id]) || {};
+    return { acquired: st.acquired || [], blackout: st.blackout ?? null, disabled: st.disabled || [] };
+  }
+  function computeGrid(section, state) {
+    const R = (section.rows || []).length, C = (section.columns || []).length;
+    const base = gridNum(section.base, 5), empty = gridNum(section.empty, 12), cap = gridNum(section.cap, 12);
+    const rowCost = gridNum(section.rowCost, 1), colCost = gridNum(section.colCost, 1), gapCost = gridNum(section.gapCost, 1);
+    const disabled = new Set((state.disabled || []).map(Number));
+    // 열 c와 c+1 사이를 지나는 비용
+    const black = state.blackout === null || state.blackout === undefined ? -1 : Number(state.blackout);
+    const cross = c => colCost + ((black === c || black === c + 1) ? 0 : gapCost);
+    const prefix = [0];
+    for (let c = 0; c < C - 1; c++) prefix.push(prefix[c] + cross(c));
+    const sources = [];
+    for (const key of state.acquired || []) {
+      const [r, c] = String(key).split('-').map(Number);
+      if (r >= 0 && r < R && c >= 0 && c < C && !disabled.has(c)) sources.push([r, c]);
+    }
+    const out = [];
+    for (let r = 0; r < R; r++) {
+      const row = [];
+      for (let c = 0; c < C; c++) {
+        if (!sources.length) { row.push(empty); continue; }
+        let best = Infinity;
+        for (const [sr, sc] of sources) {
+          const d = Math.abs(r - sr) * rowCost + Math.abs(prefix[c] - prefix[sc]);
+          if (d < best) best = d;
+        }
+        const v = base + best;
+        row.push(cap > 0 ? Math.min(cap, v) : v);
+      }
+      out.push(row);
+    }
+    return out;
+  }
+  function gridFind(section, name) {
+    name = String(name ?? '').trim();
+    const cells = section.cells || [];
+    for (let r = 0; r < cells.length; r++) for (let c = 0; c < (cells[r] || []).length; c++) {
+      if (String(cells[r][c] ?? '').trim() === name && name) return [r, c];
+    }
+    return null;
+  }
+
   // ---------- 4. 시트 하나의 값 계산기 ----------
   function toNumber(v) {
     if (v === true) return 1;
@@ -169,8 +225,9 @@
   }
 
   function makeResolver(template, sheet) {
-    const fields = {}, lists = {};
+    const fields = {}, lists = {}, grids = {};
     for (const s of template.sections || []) {
+      if (s.type === 'grid') { grids[s.id] = s; continue; }
       if (s.type === 'list') lists[s.id] = s;
       else for (const f of s.fields || []) {
         fields[f.id] = f;
@@ -206,6 +263,16 @@
         if (!lists[listId]) throw new Error(`'${listId}'라는 목록이 없어요`);
         return rowsOf(listId).length;
       },
+      grid(gridId, name) {
+        const g = grids[gridId];
+        if (!g) throw new Error(`'${gridId}'라는 특기표가 없어요`);
+        const pos = gridFind(g, name);
+        if (!pos) throw new Error(`특기표에 '${name}'이(가) 없어요`);
+        const key = `${gridId}#table`;
+        if (!cache.has(key)) cache.set(key, computeGrid(g, gridState(g, sheet)));
+        const st = gridState(g, sheet);
+        return { value: cache.get(key)[pos[0]][pos[1]], learned: st.acquired.includes(pos.join('-')) && !st.disabled.map(Number).includes(pos[1]) };
+      },
     };
 
     // 표의 한 줄 안에서는 같은 줄의 열 id를 먼저 찾고, 없으면 시트 전체 칸을 찾음
@@ -221,6 +288,7 @@
         },
         column: ctx.column,
         count: ctx.count,
+        grid: ctx.grid,
       };
       return rc;
     }
@@ -312,24 +380,43 @@
   // ---------- 6. 데이터 보관함 연결 ----------
   // 표(list)에 "source": { "dataset": "데이터키" }가 있고, 열에 "from": "데이터 항목 id"가 있으면
   // 찾기 이름 열(데이터의 첫 항목과 연결된 열)에 적힌 이름으로 데이터를 찾아 나머지 연결된 열을 채움
-  function datasetIndex(ds) {
-    const keyField = ds && (ds.fields || [])[0];
-    if (!keyField) return null;
-    const map = new Map();
-    for (const e of ds.entries || []) {
-      const k = String(e[keyField.id] ?? '').trim();
-      if (k && !map.has(k)) map.set(k, e);
-    }
-    return { keyField, map };
+  // 한 표에 데이터를 여러 개 연결할 수 있음: "source": { "dataset": "첫 데이터", "also": ["함께 쓸 데이터", …] }
+  // 함께 쓰는 데이터는 항목 구성(저장용 이름들)이 첫 데이터와 같아야 함. 같은 이름이 겹치면 앞쪽 데이터가 우선.
+  function sourceKeys(section) {
+    const src = section && section.source;
+    if (!src || !src.dataset) return [];
+    return [src.dataset, ...(src.also || []).filter(k => k && k !== src.dataset)];
+  }
+  function sameSchema(a, b) {
+    const fa = (a && a.fields) || [], fb = (b && b.fields) || [];
+    if (!fa.length || !fb.length || fa[0].id !== fb[0].id || fa.length !== fb.length) return false;
+    const ids = new Set(fa.map(f => f.id));
+    return fb.every(f => ids.has(f.id));
+  }
+  function schemaDiff(a, b) {
+    const ia = new Set(((a && a.fields) || []).map(f => f.id)), ib = new Set(((b && b.fields) || []).map(f => f.id));
+    return { onlyA: [...ia].filter(x => !ib.has(x)), onlyB: [...ib].filter(x => !ia.has(x)),
+      keyDiff: ((a && a.fields) || [])[0]?.id !== ((b && b.fields) || [])[0]?.id };
   }
   function linkInfo(section, datasets) {
-    if (!section || section.type !== 'list' || !section.source || !section.source.dataset) return null;
-    const ds = datasets && datasets[section.source.dataset];
-    const idx = datasetIndex(ds);
-    if (!idx) return null;
-    const keyCol = (section.columns || []).find(c => c.from === idx.keyField.id);
+    if (!section || section.type !== 'list') return null;
+    const keys = sourceKeys(section);
+    if (!keys.length) return null;
+    const first = datasets && datasets[keys[0]];
+    const keyField = first && (first.fields || [])[0];
+    if (!keyField) return null;
+    const keyCol = (section.columns || []).find(c => c.from === keyField.id);
     if (!keyCol) return null;
-    return { ds, keyCol, keyField: idx.keyField, map: idx.map, find: name => idx.map.get(String(name ?? '').trim()) || null };
+    const map = new Map(), from = new Map();
+    for (const k of keys) {
+      const ds = datasets[k];
+      if (!ds || (k !== keys[0] && !sameSchema(first, ds))) continue; // 구성이 다른 데이터는 건너뜀
+      for (const e of ds.entries || []) {
+        const name = String(e[keyField.id] ?? '').trim();
+        if (name && !map.has(name)) { map.set(name, e); from.set(name, k); }
+      }
+    }
+    return { ds: first, keys, keyCol, keyField, map, from, find: name => map.get(String(name ?? '').trim()) || null };
   }
   function fillRowFromEntry(section, row, entry, keyCol) {
     let changed = false;
@@ -353,8 +440,8 @@
     return changed;
   }
 
-  const api = { parse, evaluate, makeResolver, format, toNumber, toCcfolia, autoCcfolia,
-    linkInfo, fillRowFromEntry, syncLinkedRows };
+  const api = { parse, evaluate, makeResolver, format, toNumber, toCcfolia, autoCcfolia, computeGrid, gridState, gridFind,
+    linkInfo, fillRowFromEntry, syncLinkedRows, sourceKeys, sameSchema, schemaDiff };
   global.SheetEngine = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

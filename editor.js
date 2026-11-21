@@ -522,7 +522,8 @@
       const ds = l.source && datasets[l.source.dataset];
       const fromField = c.from && ds && (ds.fields || []).find(x => x.id === c.from);
       return drag(h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') + (fromField ? ' is-linked' : '') },
-        fromField ? h('span', { class: 'link-tag' }, (ds.fields[0].id === c.from ? '🔎 찾기 이름 · ' : '🔗 ') + `${ds.name}의 "${fromField.label || fromField.id}"`) : null,
+        fromField ? h('span', { class: 'link-tag' }, (ds.fields[0].id === c.from ? '🔎 찾기 이름 · ' : '🔗 ') +
+          `${ds.name}${(l.source.also || []).length ? ` 외 ${(l.source.also || []).length}개` : ''}의 "${fromField.label || fromField.id}"`) : null,
         h('div', { class: 'item-head' }, dragHandle(), label,
           kindSelect(COL_KINDS, kind, v => { if (v === 'formula' && !colGuard(l, c)) return drawEditor(); applyKind(c, v); changed(); drawEditor(); }),
           iconBtn('⧉', '이 열 복제', () => {
@@ -605,7 +606,9 @@
           if (c === l.columns.find(x => x.from === (ds && ds.fields[0] && ds.fields[0].id))) { delete c.from; continue; }
           if (fresh.has(c) || !colUsers(l.id, c.id).length) l.columns.splice(l.columns.indexOf(c), 1); else delete c.from;
         }
-        l.source = { dataset: k };
+        // 함께 쓰던 데이터 중 새 첫 데이터와 구성이 같은 것만 남김
+        const keepAlso = ((l.source && l.source.also) || []).filter(x => x !== k && datasets[x] && E.sameSchema(datasets[k], datasets[x]));
+        l.source = keepAlso.length ? { dataset: k, also: keepAlso } : { dataset: k };
         const nds = datasets[k];
         const keyField = nds.fields[0];
         const first = l.columns.find(c => c.formula === undefined && (c.type || 'text') === 'text');
@@ -635,8 +638,47 @@
         return h('div', { class: 'data-link muted small' }, '데이터 보관함에 데이터를 만들면 이 표에 연결해서 이름만 입력해도 내용이 채워지게 할 수 있어요. ',
           h('a', { href: '#/data/new' }, '데이터 만들기'));
       }
+      // ----- 함께 불러올 데이터 (항목 구성이 첫 데이터와 같은 것만) -----
+      const also = (l.source && l.source.also) || [];
+      const setAlso = list => { if (list.length) l.source.also = list; else delete l.source.also; changed(); drawEditor(); };
+      const describe = k => `${datasets[k].name || k} (${ruleLabel(k)})`;
+      const whyNot = k => {
+        const d = E.schemaDiff(ds, datasets[k]);
+        if (d.keyDiff) return '찾기 이름(첫 항목)이 달라요';
+        const parts = [];
+        if (d.onlyA.length) parts.push(`없는 항목: ${d.onlyA.join(', ')}`);
+        if (d.onlyB.length) parts.push(`더 있는 항목: ${d.onlyB.join(', ')}`);
+        return parts.join(' / ') || '항목 구성이 달라요';
+      };
+      let alsoBox = null;
+      if (ds) {
+        const candidates = sorted.filter(k => k !== cur && !also.includes(k));
+        const addSel = h('select', { onchange: e => { if (e.target.value) setAlso([...also, e.target.value]); } },
+          h('option', { value: '' }, '+ 같은 구성의 데이터 더 연결…'),
+          candidates.map(k => {
+            const ok = E.sameSchema(ds, datasets[k]);
+            return h('option', { value: k, disabled: !ok }, ok ? describe(k) : `${describe(k)} — ${whyNot(k)}`);
+          }));
+        // 같은 이름이 여러 데이터에 있으면 앞쪽 데이터 내용을 씀
+        const link = E.linkInfo(l, datasets);
+        const kf = ds.fields[0].id;
+        let dup = 0;
+        if (link) for (const k of link.keys.slice(1)) for (const e2 of (datasets[k] && datasets[k].entries) || []) {
+          const nm = String(e2[kf] ?? '').trim();
+          if (nm && link.from.get(nm) !== k) dup++;
+        }
+        alsoBox = h('div', { class: 'also-box' },
+          h('div', { class: 'sub-title' }, '함께 불러올 데이터 ', h('span', { class: 'muted' }, '(항목 구성이 위 데이터와 똑같은 것만 고를 수 있어요)')),
+          also.length ? h('div', { class: 'also-list' }, also.map((k, idx) => h('span', { class: 'also-chip' + (datasets[k] && E.sameSchema(ds, datasets[k]) ? '' : ' bad'),
+            title: datasets[k] && !E.sameSchema(ds, datasets[k]) ? `구성이 달라져서 지금은 불러오지 않아요: ${whyNot(k)}` : '' },
+            datasets[k] ? describe(k) : `${k} (없음)`,
+            h('button', { type: 'button', class: 'ghost', title: '연결 빼기', onclick: () => setAlso(also.filter((_, j) => j !== idx)) }, '×')))) : null,
+          candidates.length ? addSel : null,
+          dup ? h('p', { class: 'muted small' }, `같은 ${ds.fields[0].label || '이름'}이 여러 데이터에 ${dup}개 있어요. 이럴 땐 위쪽(먼저 연결한) 데이터의 내용을 불러와요.`) : null);
+      }
       return h('div', { class: 'data-link' },
         h('label', { class: 'mini-field' }, h('span', {}, '데이터 보관함 연결'), select),
+        alsoBox,
         ds ? [
           h('div', { class: 'sub-title' }, '불러올 항목 ', h('span', { class: 'muted' }, '(체크한 항목이 열로 생겨요)')),
           h('div', { class: 'field-checks' }, (ds.fields || []).map((fld, idx) => h('label', { class: 'mini-check' },

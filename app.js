@@ -202,7 +202,7 @@
       const sh = c.sheets[k], t = templates[k];
       if (!sh.share || !sh.share.gistId || !t) continue;
       const hit = (templateKey && k === templateKey) ||
-        (datasetKey && (t.sections || []).some(s => s.source && s.source.dataset === datasetKey));
+        (datasetKey && (t.sections || []).some(s => E.sourceKeys(s).includes(datasetKey)));
       if (!hit) continue;
       try { await gh(`/gists/${sh.share.gistId}`, { method: 'PATCH', body: await gistBody(c, k, t) }); ok++; }
       catch { fail++; }
