@@ -495,3 +495,77 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .section-list { gap: 12px; }
 .part-list { gap: 6px; }
 .drag-ghost.card { padding: 10px 14px; }
+
+/* ================= 특기표(격자) — 색은 강조색을 따라감 ================= */
+.skill-grid { display: grid; gap: 10px; }
+.grid-note { margin: 0; }
+.grid-wrap { overflow-x: auto; }
+.grid-table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13px;
+  --grid-line: color-mix(in srgb, var(--accent) 25%, var(--line)); }
+.grid-table th, .grid-table td { border: 1px solid var(--grid-line); padding: 0; height: 30px; }
+.grid-table thead th, .grid-table .corner, .grid-table .row-h {
+  background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; border-color: color-mix(in srgb, var(--accent) 80%, #000);
+}
+.grid-table .corner, .grid-table .row-h { width: 30px; min-width: 30px; text-align: center; }
+.grid-table .gap { width: 14px; min-width: 14px; border-left-style: dotted; background: var(--card); }
+.grid-table .gap.black { background: var(--ink) !important; }
+.grid-table .col-h { padding: 3px 4px; }
+.col-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.col-label { display: inline-flex; align-items: baseline; gap: 6px; justify-content: center; flex: 1; min-width: 0; white-space: nowrap; }
+.col-name { font-weight: 500; font-size: 12px; opacity: .9; overflow: hidden; text-overflow: ellipsis; }
+.gtog {
+  width: 22px; height: 22px; padding: 0; border-radius: 6px; font-size: 11px; line-height: 1; flex: 0 0 auto;
+  background: transparent; color: var(--on-accent, #fff); border: 1px solid color-mix(in srgb, var(--on-accent, #fff) 45%, transparent); opacity: .7;
+}
+.gtog:hover { opacity: 1; }
+.gtog.on { opacity: 1; background: var(--on-accent, #fff); color: var(--accent); }
+.gtog.gap-tog.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.gtog.off-tog.on { background: var(--danger); color: #fff; border-color: var(--danger); }
+.grid-table .cell { min-width: 92px; padding: 0 6px; background: var(--field); cursor: pointer; white-space: nowrap; }
+.grid-table .cell-in { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.grid-table .cell input { width: 14px; height: 14px; margin: 0; flex: 0 0 auto; cursor: pointer; accent-color: var(--accent); }
+.grid-table .cell .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.grid-table .cell .val { flex: 0 0 auto; color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+.grid-table .cell.learned { background: color-mix(in srgb, var(--accent) 20%, var(--card)); font-weight: 700; }
+.grid-table .cell.learned .val { color: var(--ink); }
+.grid-table .col-off:not(.col-h) { opacity: .45; }
+.grid-table .col-h.col-off .col-label { text-decoration: line-through; opacity: .75; }
+.reading .grid-table .cell, .grid-table .cell:has(input:disabled) { cursor: default; }
+.grid-table.grid-names td { padding: 2px; }
+.grid-table.grid-names input { font-size: 12px; padding: 4px 6px; min-width: 70px; }
+.grid-labels { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.grid-labels input { padding: 4px 6px; font-size: 13px; text-align: center; }
+.grid-col-pair { display: inline-flex; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+.grid-col-pair input { border: none; background: transparent; }
+.grid-table thead .gap { background: var(--accent); }
+
+/* ================= 한 줄에 놓을 칸 묶음 수 · 칸 수 ================= */
+.sheet.fixed-cards { grid-template-columns: repeat(var(--cards), minmax(0, 1fr)); }
+.char-main .sheet.fixed-cards { grid-template-columns: repeat(var(--cards), minmax(0, 1fr)); }
+.tpl-preview .sheet.fixed-cards { grid-template-columns: repeat(var(--cards-md), minmax(0, 1fr)); }
+.fields.grid.fixed { grid-template-columns: repeat(var(--per-row), minmax(0, 1fr)); }
+.fields.grid.fixed .field.has-parts { grid-column: auto; }
+.fields.grid.fixed .field.wide { grid-column: 1 / -1; }
+@media (max-width: 860px) { .sheet.fixed-cards, .char-main .sheet.fixed-cards { grid-template-columns: repeat(var(--cards-md), minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .sheet.fixed-cards, .char-main .sheet.fixed-cards, .tpl-preview .sheet.fixed-cards { grid-template-columns: minmax(0, 1fr); }
+  .fields.grid.fixed { grid-template-columns: repeat(var(--per-row-sm), minmax(0, 1fr)); }
+}
+
+/* ================= 넓은 카드: 칸을 가운데로 · 목록으로 돌아가기 ================= */
+.sheet .card.wide .fields.grid:not(.fixed) { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.sheet .card.wide .fields.grid:not(.fixed) > .field { flex: 0 1 170px; min-width: 130px; }
+.sheet .card.wide .fields.grid:not(.fixed) > .field.has-parts { flex-basis: 340px; }
+.sheet .card.wide .fields.grid:not(.fixed) > .field.wide { flex-basis: 100%; }
+.sheet .card.wide .fields.grid.fixed { grid-template-columns: repeat(var(--per-row), minmax(0, 220px)); justify-content: center; }
+.sheet .card.wide .fields.stack { max-width: 640px; margin-left: auto; margin-right: auto; }
+.sheet .card.wide .fields .field:not(.is-check) > span { text-align: center; }
+.sheet .card.wide .fields .field.is-check { justify-content: center; }
+.sheet .card.wide .fields .field.wide { grid-column: 1 / -1; }
+@media (max-width: 600px) {
+  .sheet .card.wide .fields.grid.fixed { grid-template-columns: repeat(var(--per-row-sm), minmax(0, 1fr)); }
+}
+.title-row { display: grid; gap: 2px; margin-right: auto; }
+.back-link { font-size: 13px; color: var(--muted); text-decoration: none; }
+.back-link:hover { color: var(--accent); }
+.save-list-btn { white-space: nowrap; }

@@ -248,7 +248,7 @@
       }
       return null;
     }
-    async function save(btn) {
+    async function save(btn, goList) {
       const err = validate();
       if (err) return A.toast(err, true);
       const kf = draft.fields[0].id;
@@ -274,11 +274,12 @@
         A.resetDatasets();
         A.setDirty(false);
         A.toast('저장했어요. 이 데이터를 연결한 시트에 바로 반영돼요.');
-        if (isNew) A.go(`/data/${encodeURIComponent(saveKey)}`);
-        else A.refreshShares({ datasetKey: saveKey }).then(({ ok, fail }) => {
+        if (!isNew) A.refreshShares({ datasetKey: saveKey }).then(({ ok, fail }) => {
           if (fail) A.toast(`공유본 ${fail}개를 새로 올리지 못했어요. 해당 캐릭터를 열어 저장하면 다시 올라가요.`, true);
           else if (ok) A.toast(`저장했어요. 공유 중인 시트 ${ok}개도 새로 반영했어요.`);
         }).catch(() => {});
+        if (goList) A.go('/data');
+        else if (isNew) A.go(`/data/${encodeURIComponent(saveKey)}`);
       } catch (e) { A.toast(e.message, true); btn.disabled = false; }
     }
     async function remove(btn) {
@@ -302,8 +303,12 @@
 
     A.show(
       h('div', { class: 'sheet-head' },
-        h('h1', { class: 'page-title' }, isNew ? '새 데이터' : (draft.name || key)),
-        h('div', { class: 'row' }, saveBtn, isNew ? null : h('button', { class: 'danger ghost', onclick: e => remove(e.target) }, '삭제'))),
+        h('div', { class: 'title-row' },
+          h('a', { class: 'back-link', href: '#/data', title: '데이터 보관함 목록으로' }, '← 데이터 보관함'),
+          h('h1', { class: 'page-title' }, isNew ? '새 데이터' : (draft.name || key))),
+        h('div', { class: 'row' }, saveBtn,
+          h('button', { class: 'save-list-btn', onclick: e => save(e.target, true) }, '저장하고 목록으로'),
+          isNew ? null : h('button', { class: 'danger ghost', onclick: e => remove(e.target) }, '삭제'))),
       h('div', { class: 'data-layout' },
         h('div', { class: 'tpl-editor' },
           h('section', { class: 'card tpl-section' },

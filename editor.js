@@ -99,7 +99,7 @@
     }
     draft.sections = draft.sections || [];
     for (const s of draft.sections) {
-      if (s.type === 'list') { s.columns = s.columns || []; } else s.fields = s.fields || [];
+      if (s.type === 'list') { s.columns = s.columns || []; } else if (s.type !== 'grid') s.fields = s.fields || [];
     }
 
     // 새로 만든 칸은 "이름"을 고치면 수식 이름도 따라 바뀜. 이미 시트가 있을 수 있는 칸은 고정.
@@ -127,12 +127,13 @@
     // ---------- 이름 목록 / 이름 바꾸기 ----------
     // 칸 + 칸에 붙은 추가 숫자(parts)까지 모두
     const parentOf = new WeakMap();
-    const allFields = () => draft.sections.filter(s => s.type !== 'list').flatMap(s => s.fields.flatMap(f => {
+    const allFields = () => draft.sections.filter(s => s.type !== 'list' && s.type !== 'grid').flatMap(s => s.fields.flatMap(f => {
       for (const p of f.parts || []) parentOf.set(p, f);
       return [f, ...(f.parts || [])];
     }));
     const labelOf = x => (parentOf.has(x) ? `${parentOf.get(x).label || parentOf.get(x).id} ${x.label || ''}`.trim() : (x.label || x.id));
     const allLists = () => draft.sections.filter(s => s.type === 'list');
+    const allGrids = () => draft.sections.filter(s => s.type === 'grid');
     function eachFormula(fn) {
       for (const f of allFields()) {
         if (f.formula !== undefined) f.formula = fn(f.formula, null);
@@ -167,6 +168,13 @@
       if (old) eachFormula((src, list) => (list && list.columns.some(c => c.id === old) ? src : replaceIdent(src, old, newId)));
       if (old in preview.values) { preview.values[newId] = preview.values[old]; delete preview.values[old]; }
       syncFormulaInputs();
+    }
+    function renameGrid(g, newId) {
+      const old = g.id;
+      if (old === newId) return;
+      g.id = newId;
+      if (old) eachFormula(src => src.replace(new RegExp(`(["'])${esc(old)}\\1`, 'g'), `$1${newId}$1`));
+      if (preview.grids && old in preview.grids) { preview.grids[newId] = preview.grids[old]; delete preview.grids[old]; }
     }
     function renameList(l, newId) {
       const old = l.id;
@@ -333,6 +341,10 @@
           .map(c => chip(c.label || c.id, `수식 이름: ${c.id}`, () => insert(c.id), 'ref'))) : null,
         group('칸', fields.map(f => chip(labelOf(f), `수식 이름: ${f.id}`, () => insert(f.id), 'ref'))),
         group('표', listChips),
+        group('특기표', allGrids().flatMap(g => [
+          chip(`${g.title || g.id}: 달성치`, `달성치("${g.id}", "특기 이름") — 그 특기의 달성치`, () => insert(`달성치("${g.id}", "")`, 2), 'list'),
+          chip(`${g.title || g.id}: 습득`, `습득("${g.id}", "특기 이름") — 습득했으면 1, 아니면 0`, () => insert(`습득("${g.id}", "")`, 2), 'list'),
+        ])),
         h('p', { class: 'fx-tip' }, '수식을 쓰는 중에 미리보기의 칸을 클릭해도 그 칸이 들어가요. 체크 칸은 체크하면 1, 아니면 0이에요.'),
       ].filter(Boolean));
       updateHelper();
@@ -628,7 +640,115 @@
     }
 
     // ---------- 묶음(카드) 하나 ----------
+    // ---------- 특기표(격자) 편집 ----------
+    const gridUsers = id => users.filter(u => (((u.sheet.grids || {})[id] || {}).acquired || []).length);
+    const gridGuard = (g, test, what) => {
+      if (fresh.has(g)) return true;
+      const found = users.filter(u => (((u.sheet.grids || {})[g.id] || {}).acquired || []).some(test || (() => true)));
+      return guard(found, what || `"${g.title || g.id}" 특기표`);
+    };
+    function gridCard(g, i) {
+      g.columns = g.columns || []; g.rows = g.rows || []; g.cells = g.cells || [];
+      const takenGrids = () => new Set(allGrids().filter(x => x !== g).map(x => x.id));
+      const idOut = { el: null };
+      const titleInput = h('input', { class: 'section-title', value: g.title || '', placeholder: '특기표 이름 (예: 특기)',
+        oninput: e => {
+          g.title = e.target.value;
+          if (fresh.has(g) && !manual.has(g)) { renameGrid(g, idFrom(e.target.value, takenGrids())); if (idOut.el) idOut.el.value = g.id; }
+          changed();
+        } });
+      if (focusTarget === g) requestAnimationFrame(() => { titleInput.focus(); titleInput.select(); focusTarget = null; });
+      const head = h('div', { class: 'section-head' }, dragHandle(), h('span', { class: 'section-kind' }, '특기표'), titleInput,
+        iconBtn(g.folded ? '🙈' : '👁', g.folded ? '숨긴 묶음이에요. 눌러서 다시 보이게' : '이 특기표를 시트에서 숨기기', () => {
+          if (g.folded) delete g.folded; else g.folded = true; changed(); drawEditor();
+        }, 'fold-btn' + (g.folded ? ' on' : '')),
+        iconBtn('×', '삭제', () => {
+          if (!gridGuard(g)) return;
+          if (!confirm(`"${g.title || g.id}" 특기표를 지울까요?`)) return;
+          draft.sections.splice(draft.sections.indexOf(g), 1); changed(); drawEditor();
+        }, 'danger'));
+
+      const numIn = (prop, label, def, hint) => h('label', { class: 'mini-field' }, h('span', { title: hint || '' }, label),
+        h('input', { type: 'number', value: g[prop] ?? def, style: 'width:90px', oninput: e => {
+          if (e.target.value === '' || Number(e.target.value) === def) delete g[prop]; else g[prop] = Number(e.target.value);
+          changed();
+        } }));
+      const R = g.rows.length, C = g.columns.length;
+      const setCell = (r, c, v) => {
+        while (g.cells.length <= r) g.cells.push([]);
+        const row = g.cells[r];
+        while (row.length <= c) row.push('');
+        row[c] = v;
+      };
+      g.columnNames = g.columnNames || [];
+      const labelsEditor = (arr, kind) => h('div', { class: 'grid-labels' },
+        h('span', { class: 'filter-label' }, kind === 'col' ? '열 (번호·이름)' : '줄 이름'),
+        arr.map((v, k) => {
+          const num = h('input', { value: v, style: 'width:' + (kind === 'col' ? '40px' : '56px'), title: kind === 'col' ? '열 번호' : '줄 이름',
+            oninput: e => { arr[k] = e.target.value; changed(); syncHeads(); } });
+          if (kind !== 'col') return num;
+          return h('span', { class: 'grid-col-pair' }, num,
+            h('input', { value: g.columnNames[k] || '', placeholder: '이름', style: 'width:84px', title: '열 이름 (선택)',
+              oninput: e => { g.columnNames[k] = e.target.value; changed(); syncHeads(); } }));
+        }),
+        h('button', { type: 'button', class: 'small-btn', onclick: () => {
+          arr.push(kind === 'col' ? String(arr.length + 1) : String(arr.length + 2));
+          if (kind === 'col') g.columnNames.length = arr.length;
+          changed(); drawEditor();
+        } }, '+'),
+        arr.length > 1 ? h('button', { type: 'button', class: 'small-btn', title: '마지막 것을 빼기', onclick: () => {
+          const last = arr.length - 1;
+          const test = k => { const [r, c] = String(k).split('-').map(Number); return kind === 'col' ? c === last : r === last; };
+          if (!gridGuard(g, test, `"${g.title || g.id}"의 마지막 ${kind === 'col' ? '열' : '줄'}`)) return;
+          arr.pop();
+          if (kind === 'col') { g.cells.forEach(row => row.splice(last)); g.columnNames.splice(last); } else g.cells.splice(last);
+          changed(); drawEditor();
+        } }, '−') : null);
+      // 특기 이름 칸들
+      const headCells = [];
+      const syncHeads = () => headCells.forEach(f => f());
+      const nameTable = h('table', { class: 'grid-table grid-names' },
+        h('thead', {}, h('tr', {}, h('th', { class: 'corner' }), g.columns.map((_, c) => {
+          const headText = () => [g.columns[c], g.columnNames[c]].filter(Boolean).join(' ');
+          const th = h('th', { class: 'col-h' }, headText());
+          headCells.push(() => { th.textContent = headText(); });
+          return th;
+        }))),
+        h('tbody', {}, g.rows.map((_, r) => {
+          const th = h('th', { class: 'row-h' }, g.rows[r]);
+          headCells.push(() => { th.textContent = g.rows[r]; });
+          return h('tr', {}, th, g.columns.map((__, c) => h('td', {},
+            h('input', { value: ((g.cells[r] || [])[c]) || '', placeholder: '특기 이름', oninput: e => { setCell(r, c, e.target.value); changed(); } }))));
+        })));
+      const paste = h('textarea', { rows: 4, placeholder: '엑셀·구글 시트에서 특기 이름 표를 복사해서 붙여넣어요. (한 줄 = 한 줄, 칸은 탭으로 구분)' });
+      const pasteBox = h('div', { class: 'paste-box', hidden: true }, paste, h('div', { class: 'row tight' },
+        h('button', { type: 'button', class: 'primary', onclick: () => {
+          const lines = paste.value.replace(/\r/g, '').split('\n').filter(l => l.trim());
+          lines.slice(0, R).forEach((line, r) => line.split('\t').slice(0, C).forEach((v, c) => setCell(r, c, v.trim())));
+          changed(); drawEditor();
+        } }, '채우기'),
+        h('button', { type: 'button', onclick: () => { pasteBox.hidden = true; } }, '취소')));
+
+      return drag(h('section', { class: 'card tpl-section is-grid' + (g.folded ? ' is-folded' : '') }, head,
+        h('p', { class: 'muted small', style: 'margin:0' },
+          '체크한(습득한) 칸은 "습득 칸 달성치", 거기서 위아래·옆으로 멀어질수록 달성치가 올라가요. 열 사이의 빈 줄도 한 칸으로 세고, 시트에서 고른 열의 양쪽 빈 줄은 검게 칠해 무효화할 수 있어요.'),
+        h('div', { class: 'row tight' },
+          numIn('base', '습득 칸 달성치', 5), numIn('empty', '습득 없을 때', 12), numIn('cap', '최대 (0=제한 없음)', 12),
+          numIn('rowCost', '위아래 한 칸', 1), numIn('colCost', '옆 열 한 칸', 1), numIn('gapCost', '빈 줄 한 칸', 1)),
+        labelsEditor(g.columns, 'col'),
+        labelsEditor(g.rows, 'row'),
+        h('div', { class: 'row tight' }, h('div', { class: 'sub-title grow' }, '특기 이름'),
+          h('button', { type: 'button', class: 'small-btn', onclick: () => { pasteBox.hidden = !pasteBox.hidden; } }, '표 붙여넣기')),
+        pasteBox,
+        h('div', { class: 'grid-wrap' }, nameTable),
+        h('details', { class: 'more' }, h('summary', {}, '더보기'),
+          idEditor(g, idOut, '수식에서 부르는 특기표 이름', v => renameGrid(g, v), takenGrids, () => gridGuard(g)),
+          h('p', { class: 'muted small' }, `다른 칸의 수식에서 달성치("${g.id}", "특기 이름")으로 그 특기의 달성치를, 습득("${g.id}", "특기 이름")으로 습득 여부(1/0)를 쓸 수 있어요.`))),
+        g, { ghost: () => head });
+    }
+
     function sectionCard(s, i) {
+      if (s.type === 'grid') return gridCard(s, i);
       const isList = s.type === 'list';
       const takenLists = () => new Set(allLists().filter(x => x !== s).map(x => x.id));
       const titleInput = h('input', { class: 'section-title', value: s.title || '', placeholder: isList ? '표 이름 (예: 기능)' : '묶음 이름 (예: 능력치)',
@@ -655,10 +775,17 @@
         }, 'danger'));
 
       const opts = h('div', { class: 'row tight section-opts' },
-        isList ? null : h('label', { class: 'mini-field' }, h('span', {}, '배치'),
-          h('select', { onchange: e => { s.layout = e.target.value; changed(); } },
-            h('option', { value: 'grid', selected: s.layout !== 'stack' }, '여러 칸 나란히'),
-            h('option', { value: 'stack', selected: s.layout === 'stack' }, '한 줄에 하나씩'))),
+        isList ? null : h('label', { class: 'mini-field' }, h('span', {}, '한 줄에 놓을 칸 수'),
+          h('input', { type: 'number', min: 1, max: 12, step: 1, style: 'width:120px', placeholder: '비우면 자동',
+            value: s.layout === 'stack' ? 1 : (s.perRow || ''),
+            title: '1이면 한 줄에 하나씩(칸 이름이 위로), 비우면 화면 너비에 맞춰 자동',
+            oninput: e => {
+              const n = Math.floor(Number(e.target.value));
+              if (!e.target.value || !(n >= 1)) { s.layout = 'grid'; delete s.perRow; }
+              else if (n === 1) { s.layout = 'stack'; delete s.perRow; }
+              else { s.layout = 'grid'; s.perRow = Math.min(n, 12); }
+              changed();
+            } })),
         h('label', { class: 'mini-check' }, h('input', { type: 'checkbox', checked: !!s.wide,
           onchange: e => { if (e.target.checked) s.wide = true; else delete s.wide; changed(); } }), '카드를 가로로 넓게'),
         isList ? idEditor(s, listIdOut, '수식에서 부르는 표 이름', v => renameList(s, v), takenLists, () => listGuard(s)) : null);
@@ -819,8 +946,17 @@
           h('label', { class: 'mini-field' }, h('span', {}, '강조색'),
             h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(draft.accent || '') ? draft.accent : '#7c5cff',
               oninput: e => { draft.accent = e.target.value; root.style.setProperty('--accent', draft.accent); changed(); } }))),
-        h('label', { class: 'mini-field' }, h('span', {}, '설명 (룰 고를 때 보이는 한 줄)'),
-          h('input', { value: draft.description || '', oninput: e => { draft.description = e.target.value; changed(); } })),
+        h('div', { class: 'row tight' },
+          h('label', { class: 'mini-field grow' }, h('span', {}, '설명 (룰 고를 때 보이는 한 줄)'),
+            h('input', { value: draft.description || '', oninput: e => { draft.description = e.target.value; changed(); } })),
+          h('label', { class: 'mini-field' }, h('span', {}, '한 줄에 놓을 칸 묶음 수'),
+            h('input', { type: 'number', min: 1, max: 6, step: 1, style: 'width:130px', placeholder: '비우면 자동',
+              value: draft.cardsPerRow || '', title: '시트에서 칸 묶음(카드)을 한 줄에 몇 개씩 놓을지. 비우면 화면 너비에 맞춰 자동',
+              oninput: e => {
+                const n = Math.floor(Number(e.target.value));
+                if (n >= 1) draft.cardsPerRow = Math.min(n, 6); else delete draft.cardsPerRow;
+                changed();
+              } }))),
         fileLabel);
       updateFileLabel();
       editorCol.replaceChildren(meta, A.dropList(h('div', { class: 'section-list' }, draft.sections.map(sectionCard)), draft.sections, 'sections'),
@@ -833,7 +969,13 @@
             const s = { title: '새 표', type: 'list', id: idFrom('새표', new Set(allLists().map(x => x.id))), wide: true,
               columns: [{ id: '이름', label: '이름', type: 'text' }], defaultRows: [] };
             fresh.add(s); fresh.add(s.columns[0]); draft.sections.push(s); focusTarget = s; changed(); drawEditor();
-          } }, '+ 표 추가 (기능·소지품처럼 줄이 늘어나는 것)')),
+          } }, '+ 표 추가 (기능·소지품처럼 줄이 늘어나는 것)'),
+          h('button', { type: 'button', onclick: () => {
+            const rows = ['2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'], columns = ['1', '2', '3', '4', '5', '6'];
+            const g = { title: '특기', type: 'grid', id: idFrom('특기', new Set(allGrids().map(x => x.id))), columns, rows,
+              cells: rows.map(() => columns.map(() => '')) };
+            fresh.add(g); draft.sections.push(g); focusTarget = g; changed(); drawEditor();
+          } }, '+ 특기표 추가 (격자)')),
         ccfoliaCard());
       updateCcPreview();
     }
@@ -902,6 +1044,10 @@
           }
           if (x.parts && !x.parts.length) delete x.parts;
         }
+        if (s.type === 'grid') {
+          s.columnNames = Array.from({ length: (s.columns || []).length }, (_, k) => (s.columnNames || [])[k] || '');
+          if (!s.columnNames.some(Boolean)) delete s.columnNames;
+        }
         if (s.type === 'list') {
           s.defaultRows = (s.defaultRows || []).filter(row => Object.keys(row).length);
           if (!s.defaultRows.length) delete s.defaultRows;
@@ -909,7 +1055,7 @@
       }
       return t;
     }
-    async function save(btn) {
+    async function save(btn, goList) {
       const { errors, warnings } = validate();
       if (errors.length) return A.toast(errors[0], true);
       if (warnings.length && !confirm('확인이 필요한 칸이 있어요.\n\n' + warnings.slice(0, 6).join('\n') +
@@ -931,7 +1077,8 @@
             else if (ok) A.toast(`룰 틀을 저장했어요. 공유 중인 시트 ${ok}개도 새로 반영했어요.`);
           }).catch(() => {});
         }
-        if (isNew) A.go(`/template/${encodeURIComponent(saveKey)}`);
+        if (goList) A.go('/templates');
+        else if (isNew) A.go(`/template/${encodeURIComponent(saveKey)}`);
       } catch (e) { A.toast(e.message, true); btn.disabled = false; }
     }
     async function remove(btn) {
@@ -973,8 +1120,11 @@
 
     A.show(
       h('div', { class: 'sheet-head' },
-        h('h1', { class: 'page-title' }, isNew ? '새 룰 틀' : '룰 틀 편집'),
+        h('div', { class: 'title-row' },
+          h('a', { class: 'back-link', href: '#/templates', title: '룰 틀 보관함 목록으로' }, '← 룰 틀 보관함'),
+          h('h1', { class: 'page-title' }, isNew ? '새 룰 틀' : '룰 틀 편집')),
         h('div', { class: 'row' }, saveBtn,
+          h('button', { class: 'save-list-btn', onclick: e => save(e.target, true) }, '저장하고 목록으로'),
           isNew ? null : h('a', { class: 'button-link', href: `#/template/new?from=${encodeURIComponent(key)}` }, '복제'),
           isNew ? null : h('button', { class: 'danger ghost', onclick: e => remove(e.target) }, '삭제'))),
       root);

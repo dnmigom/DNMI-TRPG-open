@@ -169,7 +169,10 @@
     sheet.values = sheet.values || {};
     sheet.lists = sheet.lists || {};
     for (const s of template.sections || []) {
-      if (s.type === 'list') {
+      if (s.type === 'grid') {
+        sheet.grids = sheet.grids || {};
+        if (!sheet.grids[s.id]) sheet.grids[s.id] = { acquired: [], blackout: null, disabled: [] };
+      } else if (s.type === 'list') {
         if (sheet.lists[s.id] === undefined) sheet.lists[s.id] = (s.defaultRows || []).map(r => ({ ...r }));
       } else for (const f of s.fields || []) for (const x of [f, ...(f.parts || [])]) {
         if (x.formula !== undefined || sheet.values[x.id] !== undefined) continue;
@@ -590,7 +593,7 @@
     E.syncLinkedRows(template, sh, await loadDatasets());
     return JSON.stringify({
       format: 'trpg-sheet-share/2', sharedAt: new Date().toISOString(), template,
-      character: { name: char.name, images, colors: char.colors || {}, theme: char.theme || {} }, sheet: { values: sh.values, lists: sh.lists },
+      character: { name: char.name, images, colors: char.colors || {}, theme: char.theme || {} }, sheet: { values: sh.values, lists: sh.lists, grids: sh.grids || {} },
     });
   }
   async function gistBody(char, key, template) {
@@ -889,7 +892,7 @@
         shareBox,
         h('div', { class: 'sheet-actions row' },
           h('button', { class: 'ccfolia-btn', title: '이 캐릭터를 코코포리아에 붙여넣을 수 있게 복사해요',
-            onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists },
+            onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists, grids: sheet.grids },
               sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'),
           editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '룰 틀 편집') : null,
           editing ? h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제') : null),
@@ -1002,7 +1005,7 @@
         h('div', { class: 'sheet-head' },
           h('h1', { class: 'sheet-name' }, name, colorDots(colors)),
           h('span', { class: 'rule-tag' }, (snap.template && snap.template.rule) || ''),
-          h('button', { class: 'ccfolia-btn', onclick: () => copyCcfolia(snap.template, { name, values: sheet.values, lists: sheet.lists }, location.href, note) }, '코코포리아로 복사')),
+          h('button', { class: 'ccfolia-btn', onclick: () => copyCcfolia(snap.template, { name, values: sheet.values, lists: sheet.lists, grids: sheet.grids }, location.href, note) }, '코코포리아로 복사')),
         note,
         h('div', { class: 'char-layout' }, renderPortrait(images, null),
           h('div', { class: 'char-main' }, renderSheet(snap.template, sheet, { readonly: true, accent: themeOf(colors, theme).accent }))));
@@ -1143,16 +1146,84 @@
           onclick: () => { rows.push({}); if (onChange) onChange(); draw(); } }, '+ 줄 추가'));
     }
 
+    // 특기표(격자): 습득 체크 → 가까운 습득 칸에서부터 거리만큼 달성치가 올라감
+    function renderGrid(s) {
+      sheet.grids = sheet.grids || {};
+      const st = sheet.grids[s.id] = sheet.grids[s.id] || { acquired: [], blackout: null, disabled: [] };
+      st.acquired = st.acquired || []; st.disabled = st.disabled || [];
+      const cols = s.columns || [], rows = s.rows || [];
+      const box = h('div', { class: 'skill-grid' });
+      const names = s.columnNames || [];
+      const colName = c => [cols[c] || String(c + 1), names[c]].filter(Boolean).join(' ');
+      const edited = () => { if (onChange) onChange(); recompute(); draw(); };
+      function draw() {
+        const vals = E.computeGrid(s, E.gridState(s, sheet));
+        const acq = new Set(st.acquired);
+        const dis = new Set(st.disabled.map(Number));
+        const black = st.blackout === null || st.blackout === undefined ? null : Number(st.blackout);
+        // 열 c 왼쪽의 빈 줄(c-1과 c 사이)이 검게 칠해졌는지
+        const gapBlack = c => black !== null && c > 0 && (black === c || black === c - 1);
+        // 읽기·공유 화면: 지금 상태를 한 줄로 / 편집: 열 머리글 양쪽의 작은 버튼으로 바꿈
+        const sideOf = c => (cols.length === 1 ? '' : c === 0 ? '오른쪽' : c === cols.length - 1 ? '왼쪽' : '양쪽');
+        const controls = readonly && (black !== null || dis.size)
+          ? h('p', { class: 'muted small grid-note' },
+            [black !== null ? `무효화한 빈 줄: ${colName(black)} ${sideOf(black)}`.trim() : null,
+              dis.size ? `습득 안 한 것으로 취급: ${[...dis].sort((a, b) => a - b).map(colName).join(', ')}` : null].filter(Boolean).join(' · '))
+          : null;
+        const colHead = c => {
+          const label = h('span', { class: 'col-label' }, h('b', {}, cols[c] || String(c + 1)),
+            names[c] ? h('span', { class: 'col-name' }, names[c]) : null);
+          if (readonly) return label;
+          return h('div', { class: 'col-head' },
+            h('button', { type: 'button', class: 'gtog gap-tog' + (black === c ? ' on' : ''),
+              title: black === c ? '빈 줄 무효화 풀기' : `${colName(c)} ${sideOf(c)} 빈 줄 무효화 (검게 칠하기)`,
+              onclick: () => { st.blackout = black === c ? null : c; edited(); } }, '◼'),
+            label,
+            h('button', { type: 'button', class: 'gtog off-tog' + (dis.has(c) ? ' on' : ''),
+              title: dis.has(c) ? '미습득 취급 풀기' : `${colName(c)}의 습득을 모두 없는 것으로 계산하기`,
+              onclick: () => { st.disabled = dis.has(c) ? st.disabled.filter(x => Number(x) !== c) : [...st.disabled, c]; edited(); } }, '⊘'));
+        };
+        const table = h('table', { class: 'grid-table' },
+          h('thead', {}, h('tr', {}, h('th', { class: 'corner' }),
+            cols.map((label, c) => [h('th', { class: 'gap' + (gapBlack(c) ? ' black' : '') }),
+              h('th', { class: 'col-h' + (dis.has(c) ? ' col-off' : '') }, colHead(c))]))),
+          h('tbody', {}, rows.map((rl, r) => h('tr', {}, h('th', { class: 'row-h' }, rl),
+            cols.map((_, c) => {
+              const key = `${r}-${c}`, name = ((s.cells || [])[r] || [])[c] || '';
+              const on = acq.has(key);
+              const td = h('td', { class: 'cell' + (on ? ' learned' : '') + (dis.has(c) ? ' col-off' : ''), },
+                h('div', { class: 'cell-in' },
+                  h('input', { type: 'checkbox', checked: on, disabled: readonly, 'aria-label': name || `${rl} ${colName(c)}`,
+                    onclick: e => e.stopPropagation(),
+                    onchange: e => { st.acquired = e.target.checked ? [...st.acquired, key] : st.acquired.filter(k => k !== key); edited(); } }),
+                  h('span', { class: 'name', title: name }, name),
+                  h('span', { class: 'val' }, String(vals[r][c]))));
+              if (!readonly) td.addEventListener('click', () => td.querySelector('input').click());
+              return [h('td', { class: 'gap' + (gapBlack(c) ? ' black' : '') }), td];
+            })))));
+        box.replaceChildren(...[controls, h('div', { class: 'grid-wrap' }, table)].filter(Boolean));
+      }
+      draw();
+      return box;
+    }
+
     // 표는 다시 그려질 수 있으므로, 고정 칸 계산기와 표 계산기를 나눠서 관리
     const listUpdaters = [];
-    const fieldSections = [], listSections = [];
+    const fieldSections = [], listSections = [], gridSections = [];
     const root = h('div', { class: 'sheet' });
     if (accent || template.accent) root.style.setProperty('--accent', accent || template.accent);
+    // 한 줄에 놓을 칸 묶음 수 (룰 틀마다). 화면이 좁으면 2개, 휴대폰은 1개까지 줄어듦
+    const cardsPerRow = Math.floor(Number(template.cardsPerRow));
+    if (cardsPerRow >= 1) {
+      root.classList.add('fixed-cards');
+      root.style.setProperty('--cards', cardsPerRow);
+      root.style.setProperty('--cards-md', Math.min(cardsPerRow, 2));
+    }
 
     const cards = (template.sections || []).map(s => {
       // 숨긴 묶음: 읽기·공유 화면에서는 아예 빼고, 편집할 때는 접힌 카드로 (눌러서 펼침)
       if (s.folded && readonly) return null;
-      const card = h('section', { class: 'card' + (s.wide ? ' wide' : '') + (s.folded ? ' folded-card' : '') });
+      const card = h('section', { class: 'card' + (s.wide || s.type === 'grid' ? ' wide' : '') + (s.folded ? ' folded-card' : '') + (s.type === 'grid' ? ' grid-card' : '') });
       let target = card;
       if (s.folded) {
         target = h('details', { class: 'folded-section', open: openSections.has(s),
@@ -1160,25 +1231,35 @@
           h('summary', {}, h('h2', {}, s.title || ''), h('span', { class: 'muted small' }, '숨긴 묶음')));
         card.append(target);
       } else card.append(h('h2', {}, s.title || ''));
-      if (s.type === 'list') listSections.push([target, s]);
+      if (s.type === 'grid') gridSections.push([target, s]);
+      else if (s.type === 'list') listSections.push([target, s]);
       else fieldSections.push([target, s]);
       return card;
     }).filter(Boolean);
     for (const [card, s] of fieldSections) {
-      const layout = 'fields ' + (s.layout === 'stack' ? 'stack' : 'grid');
+      // 칸 배치: 한 줄에 하나씩(stack) / 정한 칸 수(perRow) / 자동
+      const perRow = Math.floor(Number(s.perRow));
+      const fixed = s.layout !== 'stack' && perRow >= 2;
+      const layout = 'fields ' + (s.layout === 'stack' ? 'stack' : 'grid') + (fixed ? ' fixed' : '');
+      const box = kids => {
+        const el = h('div', { class: layout }, kids);
+        if (fixed) { el.style.setProperty('--per-row', perRow); el.style.setProperty('--per-row-sm', Math.min(perRow, 2)); }
+        return el;
+      };
       const shown = (s.fields || []).filter(f => !f.folded), folded = (s.fields || []).filter(f => f.folded);
-      if (shown.length) card.append(h('div', { class: layout }, shown.map(renderField)));
+      if (shown.length) card.append(box(shown.map(renderField)));
       // 접힌 칸: 편집할 때만 "숨긴 칸 보기"로 펼쳐서 입력, 읽기·공유 화면에서는 안 보임
       if (folded.length && !readonly) {
         const det = h('details', { class: 'folded-fields', open: openFolds.has(s),
           ontoggle: e => { if (e.target.open) openFolds.add(s); else openFolds.delete(s); } },
-          h('summary', {}, `숨긴 칸 ${folded.length}개 보기`), h('div', { class: layout }, folded.map(renderField)));
+          h('summary', {}, `숨긴 칸 ${folded.length}개 보기`), box(folded.map(renderField)));
         card.append(det);
       }
       if (readonly && !shown.length) card.hidden = true;
     }
     const baseUpdaters = updaters.length;
     for (const [card, s] of listSections) card.append(renderList(s));
+    for (const [card, s] of gridSections) card.append(renderGrid(s));
 
     root.append(...cards);
     recompute();
