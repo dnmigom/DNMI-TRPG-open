@@ -854,7 +854,11 @@
     const portraitSlot = h('div', { class: 'portrait-slot' });
     const ruleTabs = h('div', { class: 'rule-tabs' });
     const sheetArea = h('div', { class: 'sheet-area' });
+    const sheetTools = h('div', { class: 'sheet-tools row' }); // 공유 · 코코포리아 버튼 (읽기/편집 버튼 왼쪽)
+    const layout = h('div', { class: 'char-layout' });
     function drawPortrait() {
+      // 편집할 때는 인장 칸을 맨 위에 가로로 놓아서 시트가 화면 너비를 다 쓰게
+      layout.classList.toggle('editing', editing);
       portraitSlot.replaceChildren(renderPortrait(char.images, { pending, onChange: markDirty, viewOnly: !editing }));
     }
 
@@ -891,6 +895,7 @@
 
     function drawSheet() {
       const key = currentKey;
+      sheetTools.replaceChildren(); // 룰 시트를 다 그린 뒤에 버튼을 채움
       if (!key) {
         sheetArea.replaceChildren(h('div', { class: 'card empty-sheet' },
           h('p', {}, '아직 이 캐릭터의 룰 시트가 없어요.'),
@@ -904,7 +909,7 @@
         sheetArea.replaceChildren(h('div', { class: 'card notice' }, `이 시트의 룰 틀(templates/${key}.json)을 찾을 수 없어요.`));
         return;
       }
-      const shareBox = h('div', { class: 'share-box' });
+      const shareBox = h('span', { class: 'share-tools row tight' });
       const busy = (b, on) => { if (b) b.disabled = on; };
       async function startShare(b) {
         busy(b, true);
@@ -928,16 +933,15 @@
       function drawShare() {
         if (sheet.share && sheet.share.gistId) {
           const url = shareUrl(sheet.share.gistId);
-          const input = h('input', { value: url, readOnly: true, onfocus: e => e.target.select() });
-          shareBox.replaceChildren(h('span', { class: 'badge' }, '공유 중'), input,
-            h('button', { onclick: async () => {
+          shareBox.replaceChildren(h('span', { class: 'badge', title: url }, '공유 중'),
+            h('button', { title: url, onclick: async () => {
               try { await navigator.clipboard.writeText(url); toast('링크를 복사했어요.'); }
-              catch { input.select(); toast('링크를 선택해 뒀어요. 복사해서 보내 주세요.'); }
+              catch { window.prompt('이 링크를 복사해서 보내 주세요.', url); }
             } }, '링크 복사'),
             h('button', { class: 'danger', onclick: e => stopShare(e.target) }, '공유 중지'));
         } else {
-          shareBox.replaceChildren(h('span', { class: 'muted' }, '이 룰 시트는 나만 볼 수 있어요'),
-            h('button', { onclick: e => startShare(e.target) }, '공유 허용'));
+          shareBox.replaceChildren(
+            h('button', { title: '지금은 나만 볼 수 있어요. 누르면 읽기 전용 링크를 만들어요.', onclick: e => startShare(e.target) }, '공유 허용'));
         }
       }
       async function removeSheet(b) {
@@ -953,16 +957,16 @@
         } catch (e) { toast(e.message, true); busy(b, false); }
       }
       drawShare();
-      sheetArea.replaceChildren(
-        shareBox,
-        h('div', { class: 'sheet-actions row' },
-          h('button', { class: 'ccfolia-btn', title: '이 캐릭터를 코코포리아에 붙여넣을 수 있게 복사해요',
-            onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists, grids: sheet.grids },
-              sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'),
+      sheetTools.replaceChildren(shareBox,
+        h('button', { class: 'ccfolia-btn', title: '이 캐릭터를 코코포리아에 붙여넣을 수 있게 복사해요',
+          onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists, grids: sheet.grids },
+            sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'));
+      sheetArea.replaceChildren(...[
+        !editing ? null : h('div', { class: 'sheet-actions row' },
           editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '룰 틀 편집') : null,
           editing ? h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제') : null),
         sheetBody = renderSheet(template, fillDefaults(template, sheet),
-          { readonly: !editing, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets }));
+          { readonly: !editing, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets })].filter(Boolean));
       sheetArea.classList.toggle('reading', !editing);
     }
     let sheetBody = null;
@@ -1020,7 +1024,7 @@
         editing
           ? h('input', { class: 'sheet-name', value: char.name || '', 'aria-label': '캐릭터 이름', oninput: e => { char.name = e.target.value; markDirty(); } })
           : h('h1', { class: 'sheet-name' }, char.name || '(이름 없음)', colorDots(char.colors)),
-        h('div', { class: 'row' }, modeSwitch,
+        h('div', { class: 'row' }, sheetTools, modeSwitch,
           editing || state.dirty
             ? h('button', { id: 'save-btn', class: 'primary', disabled: !state.dirty, onclick: e => save(e.target) }, state.dirty ? '저장' : '저장됨')
             : null,
@@ -1030,7 +1034,7 @@
     show(
       head,
       colorBar, picker,
-      h('div', { class: 'char-layout' }, portraitSlot, h('div', { class: 'char-main' }, ruleTabs, sheetArea)));
+      (layout.replaceChildren(portraitSlot, h('div', { class: 'char-main' }, ruleTabs, sheetArea)), layout));
     drawPortrait();
     drawColorBar();
     applyTheme(themeOf(char.colors, char.theme));

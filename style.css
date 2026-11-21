@@ -618,3 +618,58 @@ table.list tfoot .quick-add td { padding-top: 6px; border-top: 1px dashed var(--
 .also-chip.bad { border-color: var(--danger); color: var(--danger); }
 .also-box select { width: auto; max-width: 100%; }
 table.list td select.cell-select { min-width: 100px; }
+output.computed { overflow-wrap: anywhere; }
+
+/* ================= 편집할 때 인장 칸은 맨 위에 가로로 ================= */
+.char-layout.editing { grid-template-columns: minmax(0, 1fr); }
+.char-layout.editing .portrait-slot { position: static; }
+.char-layout.editing .portrait-panel {
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  grid-template-areas: "frame tabs" "frame controls"; align-items: start; column-gap: 16px;
+  padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+}
+.char-layout.editing .portrait-tabs { grid-area: tabs; max-width: 420px; }
+.char-layout.editing .portrait-frame { grid-area: frame; grid-row: 1 / span 2; min-height: 160px; max-height: 260px; padding: 6px; }
+.char-layout.editing .portrait-frame img { max-height: 246px; }
+.char-layout.editing .portrait-controls { grid-area: controls; max-width: 520px; }
+@media (max-width: 600px) {
+  .char-layout.editing .portrait-panel { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tabs" "frame" "controls"; }
+  .char-layout.editing .portrait-frame { grid-row: auto; }
+}
+
+/* ================= 머리줄: 공유 · 코코포리아 · 읽기/편집 ================= */
+.sheet-head .row { flex-wrap: wrap; justify-content: flex-end; }
+.sheet-tools { gap: 6px; flex-wrap: wrap; }
+.sheet-tools:empty { display: none; }
+.share-tools { gap: 6px; align-items: center; }
+.sheet-tools button { font-size: 14px; }
+
+/* ================= 칸이 카드 밖으로 삐져나오지 않게 ================= */
+.sheet .card, .sheet .card > *, .fields, .field > * { min-width: 0; max-width: 100%; }
+.fields.grid { grid-template-columns: repeat(auto-fill, minmax(min(130px, 100%), 1fr)); }
+.sheet .card.wide .fields.grid:not(.fixed) > .field { min-width: min(130px, 100%); }
+.field input, .field select, .field textarea, .field output { max-width: 100%; }
+output.computed { min-width: min(48px, 100%); overflow-wrap: anywhere; }
+/* 숫자 / 최대치 : 둘 다 남은 폭에 맞춰 줄어듦 */
+.with-max { min-width: 0; }
+.with-max input, .with-max input[readonly] { flex: 1 1 3em; width: auto; min-width: 0; }
+.with-max output.computed { flex: 0 1 auto; min-width: 2.2em; padding-left: 6px; padding-right: 6px; }
+.with-max .slash { flex: none; }
+/* 한 칸에 숫자 여러 개: 좁으면 줄을 바꿈 */
+.multi-num { flex-wrap: wrap; min-width: 0; }
+.multi-num .part { flex: 1 1 3.5em; }
+.multi-num .part output.computed { padding-left: 4px; padding-right: 4px; }
+.multi-num .part-sep { flex: none; }
+.fields.stack .field > output.computed { max-width: 100%; }
+/* 칸이 아주 좁으면 "/ 최대치"를 아랫줄로 */
+.with-max { flex-wrap: wrap; row-gap: 4px; }
+.with-max input, .with-max input[readonly] { flex-basis: 2.5em; padding-left: 6px; padding-right: 6px; }
+.with-max output.computed { flex: 1 0 auto; max-width: 100%; }
+.with-max:has(output.computed) > input { flex-grow: 2; }
+/* 여러 숫자 칸: 숫자 하나하나는 쪼개지 않고, 자리가 모자라면 통째로 다음 줄로 */
+.multi-num .with-max { flex-wrap: nowrap; }
+.multi-num .part { flex: 1 1 auto; min-width: min(3.2em, 100%); }
+.multi-num .part:has(.with-max) { min-width: min(7.5em, 100%); }
+.multi-num .part { flex: 1 1 3.5em; min-width: auto; max-width: 100%; }
+.multi-num .part:has(.with-max) { flex-basis: 7.5em; min-width: min(7.5em, 100%); }
+.multi-num .part output.computed { overflow-wrap: normal; word-break: keep-all; }
