@@ -9,7 +9,7 @@
 
   const KINDS = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글'], ['checkbox', '체크'],
     ['select', '선택 목록'], ['image', '그림 주소'], ['formula', '자동 계산']];
-  const COL_KINDS = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글'], ['checkbox', '체크'], ['formula', '자동 계산']];
+  const COL_KINDS = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글'], ['checkbox', '체크'], ['select', '선택 목록'], ['formula', '자동 계산']];
   const FUNCS = [
     ['내림', '소수점 아래를 버려요. 내림(7 / 2) → 3'],
     ['올림', '소수점 아래를 올려요. 올림(7 / 2) → 4'],
@@ -535,6 +535,10 @@
           }),
           iconBtn('×', '열 삭제', () => { if (!colGuard(l, c)) return; l.columns.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         kind === 'formula' ? formulaInput(c, 'formula', { list: l, col: c, prop: 'formula' }, '예: 기본 + 투자') : null,
+        kind === 'select' ? h('label', { class: 'mini-field' }, h('span', {}, '선택지 (쉼표로 구분)'),
+          h('input', { value: (c.options || []).join(', '), placeholder: '예: 주동작, 보조동작, 상시', oninput: e => {
+            c.options = e.target.value.split(',').map(x => x.trim()).filter(Boolean); changed();
+          } })) : null,
         h('details', { class: 'more' }, h('summary', {}, '더보기'),
           idEditor(c, idOut, '수식에서 부르는 이름', v => renameColumn(l, c, v), takenIds, () => colGuard(l, c)))), c);
     }
@@ -566,6 +570,12 @@
           return h('div', { class: 'linked-cell is-linked', title: '데이터 보관함에서 불러온 값' }, String(row[c.id] ?? ''));
         }
         if (c.type === 'checkbox') return h('input', { type: 'checkbox', checked: !!row[c.id], onchange: e => { row[c.id] = e.target.checked; sync(); changed(); } });
+        if (c.type === 'select') {
+          const cur = String(row[c.id] ?? ''), opts = c.options || [];
+          return h('select', { onchange: e => { if (e.target.value) row[c.id] = e.target.value; else delete row[c.id]; sync(); changed(); } },
+            h('option', { value: '' }, '—'), opts.map(o => h('option', { value: o, selected: o === cur }, o)),
+            cur && !opts.includes(cur) ? h('option', { value: cur, selected: true }, cur) : null);
+        }
         return h('input', { type: c.type === 'number' ? 'number' : 'text', value: row[c.id] ?? '', oninput: e => {
           const v = e.target.value;
           if (v === '') delete row[c.id]; else row[c.id] = c.type === 'number' ? Number(v) : v;
@@ -621,8 +631,9 @@
       }
       function toggleField(fld, on) {
         if (on) {
-          const type = fld.type === 'number' ? 'number' : fld.type === 'textarea' ? 'textarea' : 'text';
+          const type = fld.type === 'number' ? 'number' : fld.type === 'textarea' ? 'textarea' : fld.type === 'select' ? 'select' : 'text';
           const c = { id: idFrom(fld.label || fld.id, new Set(l.columns.map(x => x.id))), label: fld.label || fld.id, type, from: fld.id };
+          if (type === 'select') c.options = [...(fld.options || [])];
           fresh.add(c); l.columns.push(c);
           for (const row of l.defaultRows || []) { const e = E.linkInfo(l, datasets); const en = e && e.find(row[e.keyCol.id]); if (en) E.fillRowFromEntry(l, row, en, e.keyCol); }
         } else {

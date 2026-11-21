@@ -617,3 +617,4 @@ table.list tfoot .quick-add td { padding-top: 6px; border-top: 1px dashed var(--
 .also-chip button { padding: 2px 6px; }
 .also-chip.bad { border-color: var(--danger); color: var(--danger); }
 .also-box select { width: auto; max-width: 100%; }
+table.list td select.cell-select { min-width: 100px; }

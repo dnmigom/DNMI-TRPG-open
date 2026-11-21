@@ -1152,6 +1152,14 @@
         if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && c.type === 'textarea')) {
           return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터 보관함에서 불러온 값' : '' }, String(row[c.id] ?? ''));
         }
+        if (c.type === 'select') {
+          // 선택 목록 열: 고르기만 하면 됨 (선택지에 없는 예전 값도 그대로 보여 줌)
+          const cur = String(row[c.id] ?? ''), opts = c.options || [];
+          if (readonly) return h('div', { class: 'linked-cell' }, cur || '—');
+          return h('select', { class: 'cell-select', onchange: e => { row[c.id] = e.target.value; changed(); } },
+            h('option', { value: '' }, '—'), opts.map(o => h('option', { value: o, selected: o === cur }, o)),
+            cur && !opts.includes(cur) ? h('option', { value: cur, selected: true }, cur) : null);
+        }
         return input(c.type || 'text', row[c.id], v => { row[c.id] = v; }, 2);
       }
       function draw() {
