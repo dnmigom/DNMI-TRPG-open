@@ -35,7 +35,7 @@
       if (['>=', '<=', '==', '!=', '&&', '||'].includes(two)) { tokens.push({ t: 'op', v: two }); i += 2; continue; }
       if (c === '=') { tokens.push({ t: 'op', v: '==' }); i++; continue; } // "=" 하나도 "같다"로 취급
       if ('+-*/%(),<>!'.includes(c)) { tokens.push({ t: 'op', v: c }); i++; continue; }
-      throw new Error(`수식에 쓸 수 없는 문자가 있어요: ${c}`);
+      throw new Error(`수식에 '${c}'를 그대로 쓸 수 없어요. 기호를 글자로 쓰려면 "${c}"처럼 따옴표로 감싸 주세요`);
     }
     return tokens;
   }
@@ -79,6 +79,7 @@
         return { k: 'ref', id: t.v };
       }
       if (isOp('(')) { p++; const e = or(); expect(')'); return e; }
+      if (t.t === 'op' && t.v !== ')' && t.v !== ',') throw new Error(`'${t.v}'는 이 자리에 올 수 없어요. 기호를 글자로 쓰려면 "${t.v}"처럼 따옴표로 감싸 주세요`);
       throw new Error(`'${t.v}'는 이 자리에 올 수 없어요`);
     }
     const mul = binary(unary, ['*', '/', '%']);
@@ -95,6 +96,7 @@
   // ---------- 3. 함수 목록 (영어 / 한국어 둘 다 사용 가능) ----------
   const num = v => (typeof v === 'number' ? v : Number(v) || 0);
   const sameText = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+  const textOf = v => (v === undefined || v === null ? '' : typeof v === 'number' ? format(v) : v === true ? '1' : v === false ? '' : String(v));
   const FUNCS = {
     floor: (ev, a) => Math.floor(num(ev(a[0]))),
     ceil: (ev, a) => Math.ceil(num(ev(a[0]))),
@@ -111,6 +113,12 @@
     count: (ev, a, ctx) => ctx.count(String(ev(a[0]))),
     // 표에서 글자 찾기: has("표id", "열id", "A") → 그 열에 A가 있으면 1, countif(…) → A가 몇 줄인지,
     // cell("표id", 줄번호, "열id") → 그 칸의 값 (줄번호는 1부터)
+    // 글자 다루기: contains(값, "글자") → 들어 있으면 1, concat(a, b, …) → 이어 붙이기,
+    // joincol("표id", "열id", 구분자) → 표의 한 열을 줄마다 이어서 나열 (빈 칸은 건너뜀, 구분자 기본 ", ")
+    contains: (ev, a) => { const t = textOf(ev(a[1])); return t !== '' && textOf(ev(a[0])).includes(t) ? 1 : 0; },
+    concat: (ev, a) => a.map(x => textOf(ev(x))).join(''),
+    joincol: (ev, a, ctx) => ctx.raw(String(ev(a[0])), String(ev(a[1]))).map(textOf).filter(t => t !== '')
+      .join(a.length > 2 ? textOf(ev(a[2])) : ', '),
     has: (ev, a, ctx) => (ctx.raw(String(ev(a[0])), String(ev(a[1]))).some(v => sameText(v, ev(a[2]))) ? 1 : 0),
     countif: (ev, a, ctx) => ctx.raw(String(ev(a[0])), String(ev(a[1]))).filter(v => sameText(v, ev(a[2]))).length,
     cell: (ev, a, ctx) => { const col = ctx.raw(String(ev(a[0])), String(ev(a[2]))); const v = col[num(ev(a[1])) - 1]; return v === undefined || v === null ? '' : v; },
@@ -122,7 +130,7 @@
     내림: 'floor', 올림: 'ceil', 반올림: 'round', 버림: 'trunc', 절댓값: 'abs',
     최소: 'min', 최대: 'max', 합: 'sum', 합계: 'sum', 범위: 'clamp', 만약: 'if',
     목록합계: 'total', 개수: 'count', 달성치: 'target', 습득: 'learned',
-    포함: 'has', 몇개: 'countif', 표칸: 'cell',
+    포함: 'has', 몇개: 'countif', 표칸: 'cell', 들어있음: 'contains', 잇기: 'concat', 목록잇기: 'joincol',
   };
 
   function evalAst(node, ctx) {

@@ -19,6 +19,9 @@
     ['합계', '모두 더해요. 합계(근력, 민첩, 정신)'],
     ['범위', '범위(값, 최소, 최대) 사이로 묶어요'],
     ['만약', '만약(조건, 맞을 때, 틀릴 때). 예: 만약(부상, -2, 0)'],
+    ['들어있음', '들어있음(값, "글자") → 그 글자가 들어 있으면 1. 예: 만약(들어있음(이름, "불"), "*", "&")'],
+    ['잇기', '잇기(a, b, …) → 글자를 이어 붙여요. 예: 잇기("*", 이름)'],
+    ['목록잇기', '목록잇기("표", "열", ", ") → 표의 한 열을 줄마다 이어서 나열'],
   ];
   const OPS = ['+', '-', '*', '/', '(', ')', '>', '>=', '<', '<=', '='];
   const OP_LABEL = { '*': '×', '/': '÷', '>=': '≥', '<=': '≤' };
@@ -374,6 +377,18 @@
         } else v = ctx.expr || ctx.prop === 'max' ? r.evaluate(src) : r.get(ctx.field.id);
         helperStatus.textContent = `✓ 미리보기 값: ${E.format(v)}` + (ctx.list ? ' (첫 줄 기준)' : '');
         helperStatus.classList.add('ok');
+        // 비교(=, !=)에서 칸 이름을 따옴표로 감싸면 칸 값이 아니라 글자 그대로 비교돼서 늘 틀리게 나옴 → 알려 줌
+        const ids = new Set([...allFields().map(f => f.id), ...(ctx.list ? ctx.list.columns.map(c => c.id) : [])]);
+        const quoted = [];
+        (function walk(n) {
+          if (!n || typeof n !== 'object') return;
+          if (n.k === 'bin' && (n.op === '==' || n.op === '!=')) for (const side of [n.a, n.b]) if (side.k === 'str' && ids.has(side.v)) quoted.push(side.v);
+          for (const x of [n.a, n.b, ...(n.args || [])]) walk(x);
+        })(E.parse(src));
+        if (quoted.length) {
+          helperStatus.textContent += ` — ⚠ "${quoted[0]}"는 따옴표 안이라 칸 값이 아니라 글자 "${quoted[0]}" 그대로 비교돼요. 칸 값을 쓰려면 따옴표 없이 ${quoted[0]}라고 써 주세요.`;
+          helperStatus.classList.remove('ok'); helperStatus.classList.add('err');
+        }
       } catch (e) {
         helperStatus.textContent = '⚠ ' + e.message;
         helperStatus.classList.add('err');
