@@ -7,7 +7,7 @@
 (function () {
   'use strict';
   const A = window.SheetApp, h = A.h;
-  const TYPES = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글']];
+  const TYPES = [['text', '글자'], ['number', '숫자'], ['textarea', '긴 글'], ['select', '선택 목록']];
   const clone = o => JSON.parse(JSON.stringify(o));
   const validId = id => /^[\p{L}_][\p{L}\p{N}_]*$/u.test(id || '');
   function idFrom(label, taken) {
@@ -96,6 +96,35 @@
       f.id = newId;
     }
 
+    // ---------- 선택 목록 항목 ----------
+    // 이미 적힌 값들 (선택지로 바꿀 때 그대로 쓸 수 있게)
+    const distinctValues = f => [...new Set(draft.entries.map(e => String(e[f.id] ?? '').trim()).filter(Boolean))];
+    function optionsEditor(f) {
+      f.options = f.options || [];
+      const missing = () => distinctValues(f).filter(v => !f.options.includes(v));
+      const note = h('span', { class: 'muted small' });
+      const addBtn = h('button', { type: 'button', class: 'small-btn', onclick: () => {
+        f.options = [...f.options, ...missing()];
+        input.value = f.options.join(', ');
+        changed(); drawTable(); updateNote();
+      } }, '적힌 값을 선택지에 추가');
+      const updateNote = () => {
+        const m = missing();
+        note.textContent = m.length ? `선택지에 없는 값 ${m.length}개가 적혀 있어요: ${m.slice(0, 4).join(', ')}${m.length > 4 ? ' …' : ''}` : '';
+        addBtn.hidden = !m.length;
+      };
+      let timer;
+      const input = h('input', { value: f.options.join(', '), placeholder: '예: 주동작, 보조동작, 상시', oninput: e => {
+        f.options = e.target.value.split(',').map(x => x.trim()).filter(Boolean);
+        changed(); updateNote();
+        clearTimeout(timer); timer = setTimeout(drawTable, 300);
+      } });
+      updateNote();
+      return h('div', { class: 'options-editor' },
+        h('label', { class: 'mini-field' }, h('span', {}, '선택지 (쉼표로 구분)'), input),
+        h('div', { class: 'row tight' }, note, addBtn));
+    }
+
     // ---------- 항목 구성 ----------
     const schemaCard = h('section', { class: 'card tpl-section' });
     function drawSchema() {
@@ -120,7 +149,11 @@
                 if (fresh.has(f) && !manual.has(f)) { renameField(f, idFrom(e.target.value, taken(f))); idInput.value = f.id; }
                 changed(); drawTableHead();
               } }),
-              h('select', { class: 'kind', onchange: e => { f.type = e.target.value; changed(); drawTable(); } },
+              h('select', { class: 'kind', onchange: e => {
+                f.type = e.target.value;
+                if (f.type === 'select') { if (!f.options || !f.options.length) f.options = distinctValues(f); } else delete f.options;
+                changed(); drawSchema(); drawTable();
+              } },
                 TYPES.map(([v, l]) => h('option', { value: v, selected: (f.type || 'text') === v }, l))),
               h('button', { type: 'button', class: 'icon-btn danger', title: '항목 삭제', onclick: () => {
                 if (draft.fields.length === 1) return A.toast('항목은 하나 이상 있어야 해요.', true);
@@ -130,6 +163,7 @@
                 for (const e of draft.entries) delete e[f.id];
                 draft.fields.splice(i, 1); changed(); drawSchema(); drawTable();
               } }, '×')),
+            f.type === 'select' ? optionsEditor(f) : null,
             h('details', { class: 'more' }, h('summary', {}, '더보기'),
               h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (룰 틀에서 연결할 때 쓰여요)'), idInput))), f, {
             // 룰 틀에 연결된 데이터는 찾기 이름(첫 번째 항목)을 바꿀 수 없음
@@ -161,7 +195,14 @@
         draft.fields.map((f, i) => {
           const t = f.type || 'text';
           const set = v => { if (v === '' || v == null) delete e[f.id]; else e[f.id] = v; changed(); };
-          const el = t === 'textarea'
+          const cur = String(e[f.id] ?? '');
+          const opts = f.options || [];
+          const el = t === 'select'
+            ? h('select', { class: i === 0 ? 'key-input' : '', onchange: ev => set(ev.target.value) },
+              h('option', { value: '' }, '—'),
+              opts.map(o => h('option', { value: o, selected: o === cur }, o)),
+              cur && !opts.includes(cur) ? h('option', { value: cur, selected: true }, `${cur} (선택지에 없음)`) : null)
+            : t === 'textarea'
             ? A.autoGrow(h('textarea', { value: e[f.id] ?? '', oninput: ev => set(ev.target.value) }))
             : h('input', { type: t === 'number' ? 'number' : 'text', value: e[f.id] ?? '',
               class: i === 0 ? 'key-input' : '',
