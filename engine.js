@@ -94,6 +94,7 @@
 
   // ---------- 3. 함수 목록 (영어 / 한국어 둘 다 사용 가능) ----------
   const num = v => (typeof v === 'number' ? v : Number(v) || 0);
+  const sameText = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
   const FUNCS = {
     floor: (ev, a) => Math.floor(num(ev(a[0]))),
     ceil: (ev, a) => Math.ceil(num(ev(a[0]))),
@@ -108,6 +109,11 @@
     // 목록(표) 함수: total("목록id", "열id"), count("목록id")
     total: (ev, a, ctx) => ctx.column(String(ev(a[0])), String(ev(a[1]))).reduce((s, v) => s + num(v), 0),
     count: (ev, a, ctx) => ctx.count(String(ev(a[0]))),
+    // 표에서 글자 찾기: has("표id", "열id", "A") → 그 열에 A가 있으면 1, countif(…) → A가 몇 줄인지,
+    // cell("표id", 줄번호, "열id") → 그 칸의 값 (줄번호는 1부터)
+    has: (ev, a, ctx) => (ctx.raw(String(ev(a[0])), String(ev(a[1]))).some(v => sameText(v, ev(a[2]))) ? 1 : 0),
+    countif: (ev, a, ctx) => ctx.raw(String(ev(a[0])), String(ev(a[1]))).filter(v => sameText(v, ev(a[2]))).length,
+    cell: (ev, a, ctx) => { const col = ctx.raw(String(ev(a[0])), String(ev(a[2]))); const v = col[num(ev(a[1])) - 1]; return v === undefined || v === null ? '' : v; },
     // 특기표: target("표id", "특기 이름") → 달성치, learned("표id", "특기 이름") → 습득했으면 1
     target: (ev, a, ctx) => ctx.grid(String(ev(a[0])), String(ev(a[1]))).value,
     learned: (ev, a, ctx) => (ctx.grid(String(ev(a[0])), String(ev(a[1]))).learned ? 1 : 0),
@@ -116,6 +122,7 @@
     내림: 'floor', 올림: 'ceil', 반올림: 'round', 버림: 'trunc', 절댓값: 'abs',
     최소: 'min', 최대: 'max', 합: 'sum', 합계: 'sum', 범위: 'clamp', 만약: 'if',
     목록합계: 'total', 개수: 'count', 달성치: 'target', 습득: 'learned',
+    포함: 'has', 몇개: 'countif', 표칸: 'cell',
   };
 
   function evalAst(node, ctx) {
@@ -130,6 +137,14 @@
       case 'bin': {
         if (node.op === '&&') return ev(node.a) && ev(node.b) ? 1 : 0;
         if (node.op === '||') return ev(node.a) || ev(node.b) ? 1 : 0;
+        if (node.op === '==' || node.op === '!=') {
+          // 글자끼리도 비교 가능: 이름 = "A"
+          const x = ev(node.a), y = ev(node.b);
+          const eq = (typeof x === 'string' || typeof y === 'string')
+            ? String(x ?? '').trim() === String(y ?? '').trim()
+            : num(x) === num(y);
+          return (node.op === '==') === eq ? 1 : 0;
+        }
         const a = num(ev(node.a)), b = num(ev(node.b));
         switch (node.op) {
           case '+': return a + b;
@@ -224,6 +239,7 @@
     return Number.isNaN(n) ? 0 : n;
   }
 
+  const TEXTY = ['text', 'textarea', 'select'];
   function makeResolver(template, sheet) {
     const fields = {}, lists = {}, grids = {};
     for (const s of template.sections || []) {
@@ -250,7 +266,9 @@
         if (cache.has(id)) return cache.get(id);
         const f = fields[id];
         if (!f) throw new Error(`'${id}'라는 칸이 없어요`);
-        const v = f.formula ? guarded(id, () => evaluate(f.formula, ctx)) : toNumber(values[id]);
+        const v = f.formula ? guarded(id, () => evaluate(f.formula, ctx))
+          : TEXTY.includes(f.type) ? String(values[id] ?? '') // 글자 칸은 글자 그대로 (계산할 땐 숫자로 바뀜)
+          : toNumber(values[id]);
         cache.set(id, v);
         return v;
       },
@@ -262,6 +280,13 @@
       count(listId) {
         if (!lists[listId]) throw new Error(`'${listId}'라는 목록이 없어요`);
         return rowsOf(listId).length;
+      },
+      raw(listId, colId) {
+        const s = lists[listId];
+        if (!s) throw new Error(`'${listId}'라는 목록이 없어요`);
+        const c = (s.columns || []).find(x => x.id === colId);
+        if (!c) throw new Error(`'${listId}' 표에 '${colId}' 열이 없어요`);
+        return rowsOf(listId).map((row, i) => (c.formula !== undefined ? rowCtx(s, row, i).get(colId) : row[colId]));
       },
       grid(gridId, name) {
         const g = grids[gridId];
@@ -284,10 +309,11 @@
           const c = cols[id];
           if (!c) return ctx.get(id);
           if (c.formula) return guarded(`${s.id}#${i}.${id}`, () => evaluate(c.formula, rc));
-          return toNumber(row[id]);
+          return TEXTY.includes(c.type || 'text') && c.type !== undefined ? String(row[id] ?? '') : toNumber(row[id]);
         },
         column: ctx.column,
         count: ctx.count,
+        raw: ctx.raw,
         grid: ctx.grid,
       };
       return rc;

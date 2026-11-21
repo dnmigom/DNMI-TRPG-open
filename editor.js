@@ -329,6 +329,10 @@
       const fields = allFields().filter(f => f.id && f !== ctx.field);
       const listChips = allLists().flatMap(l => [
         chip(`${l.title || l.id} 줄 수`, `개수("${l.id}")`, () => insert(`개수("${l.id}")`), 'list'),
+        // 글자·선택 목록 열: 그 열에 특정 이름이 있는지 (있으면 1) → 만약(…, 2, 0) 처럼 써요
+        ...l.columns.filter(c => c.id && c.formula === undefined && ['text', 'select', undefined].includes(c.type))
+          .map(c => chip(`${l.title || l.id}: ${c.label || c.id}에 이름이 있으면`, `만약(포함("${l.id}", "${c.id}", "이름"), 2, 0) — 그 열에 이름이 있으면 2, 없으면 0`,
+            () => insert(`만약(포함("${l.id}", "${c.id}", ""), 2, 0)`, 9), 'list')),
         ...l.columns.filter(c => c.id && (c.type === 'number' || c.formula !== undefined) && !(ctx.list === l && c === ctx.col))
           .map(c => chip(`${l.title || l.id}: ${c.label || c.id} 합계`, `목록합계("${l.id}", "${c.id}")`,
             () => insert(`목록합계("${l.id}", "${c.id}")`), 'list')),
