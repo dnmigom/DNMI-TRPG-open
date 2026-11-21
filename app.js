@@ -83,6 +83,17 @@
   }
   let config = loadConfig();
 
+  // 화면 폭 (이 브라우저에만 저장): 비우면 기본 1080px, 아니면 창 너비의 %
+  const VIEW_KEY = 'trpg-sheet-view';
+  function loadView() { try { return JSON.parse(localStorage.getItem(VIEW_KEY)) || {}; } catch { return {}; } }
+  function applyView(v) {
+    const pct = Number(v && v.width);
+    if (pct >= 30 && pct <= 100) document.documentElement.style.setProperty('--page-max', pct + 'vw');
+    else document.documentElement.style.removeProperty('--page-max');
+  }
+  let view = loadView();
+  applyView(view);
+
   // ---------------- GitHub API ----------------
   function explain(status, data) {
     const m = (data && data.message) || '';
@@ -278,7 +289,24 @@
       config = {}; templateCache = null;
       showSetup();
     }
-    show(h('form', { class: 'card narrow', onsubmit: connect },
+    // 보기 설정: 화면 폭
+    const pctLabel = h('strong', {}, view.width ? `${view.width}%` : '기본');
+    const range = h('input', { type: 'range', min: 40, max: 100, step: 5, value: view.width || 70, oninput: e => {
+      view = { ...view, width: Number(e.target.value) };
+      pctLabel.textContent = `${view.width}%`;
+      applyView(view);
+      try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
+    } });
+    const viewCard = h('div', { class: 'card narrow view-card' },
+      h('h2', {}, '보기 설정'),
+      h('p', { class: 'muted' }, '시트와 편집기의 가로 폭을 창 너비의 몇 %로 쓸지 정해요. 이 브라우저에만 저장돼요.'),
+      h('div', { class: 'row' }, h('span', {}, '화면 폭'), range, pctLabel,
+        h('button', { type: 'button', onclick: () => {
+          view = { ...view }; delete view.width;
+          try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
+          applyView(view); pctLabel.textContent = '기본'; range.value = 70;
+        } }, '기본으로')));
+    show(viewCard, h('form', { class: 'card narrow', onsubmit: connect },
       h('h2', {}, '연결 설정'),
       h('p', { class: 'muted' }, '시트가 저장될 비공개 저장소와 토큰을 입력해 주세요. 이 정보는 지금 쓰는 브라우저에만 저장돼요.'),
       h('label', { class: 'field' }, h('span', {}, 'GitHub 사용자명'), owner),
@@ -1102,19 +1130,24 @@
       function cell(c, row, i) {
         if (c.formula) return computedCell(r => r.cell(s.id, i, c.id));
         if (link && c === link.keyCol && !readonly) {
-          return h('input', { type: 'text', value: row[c.id] ?? '', list: listId, placeholder: `${link.keyField.label || '이름'} 입력`,
-            oninput: e => {
-              row[c.id] = e.target.value;
-              const entry = link.find(e.target.value);
-              if (onChange) onChange();
-              if (entry || e.target.dataset.linked) {
-                if (entry) E.fillRowFromEntry(s, row, entry, link.keyCol);
-                draw();
-                const again = tbody.children[i] && tbody.children[i].querySelector('input[list]');
-                if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
-              } else recompute();
-            },
-            'data-linked': link.find(row[c.id]) ? '1' : null });
+          // 이름을 다 적고 확정할 때(목록에서 고르기·Enter·다른 곳 누르기)만 데이터를 불러옴
+          // → 한글 조합 중이거나 "힐"처럼 다른 이름의 앞부분일 때 미리 채워지지 않음
+          const el = h('input', { type: 'text', value: row[c.id] ?? '', list: listId, placeholder: `${link.keyField.label || '이름'} 입력` });
+          const wasLinked = !!link.find(row[c.id]);
+          const commit = () => {
+            const entry = link.find(el.value);
+            if (entry) E.fillRowFromEntry(s, row, entry, link.keyCol);
+            else if (wasLinked) for (const col of cols) if (col.from && col !== link.keyCol) delete row[col.id]; // 다른 이름으로 바꾸면 예전 내용은 비움
+            if (entry || wasLinked) { if (onChange) onChange(); draw(); }
+          };
+          el.addEventListener('input', e => {
+            row[c.id] = el.value;
+            if (onChange) onChange();
+            recompute();
+            if (e.inputType === 'insertReplacementText') commit(); // 목록에서 골랐을 때
+          });
+          el.addEventListener('change', commit);
+          return el;
         }
         if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && c.type === 'textarea')) {
           return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터 보관함에서 불러온 값' : '' }, String(row[c.id] ?? ''));
@@ -1133,15 +1166,37 @@
           readonly ? null : h('td', { class: 'row-del' },
             h('button', { type: 'button', class: 'ghost', title: '이 줄 삭제',
               onclick: () => { rows.splice(i, 1); if (onChange) onChange(); draw(); } }, '×')))));
-        if (!rows.length) tbody.append(h('tr', {}, h('td', { colspan: cols.length + 1, class: 'muted center' }, '비어 있어요')));
+        if (!rows.length && !(link && !readonly)) tbody.append(h('tr', {}, h('td', { colspan: cols.length + 1, class: 'muted center' }, '비어 있어요')));
       }
       listUpdaters.push(drawRows);
       drawRows();
+      // 데이터와 연결된 표: 맨 아래 칸에 이름을 적으면 새 줄이 생기면서 나머지 열이 채워짐
+      let quick = null;
+      if (link && !readonly) {
+        const qi = h('input', { type: 'text', list: listId, class: 'quick-add-input',
+          placeholder: `${link.keyField.label || '이름'}을 적거나 골라서 새 줄 추가` });
+        const add = () => {
+          const v = qi.value.trim();
+          if (!v) return;
+          const row = { [link.keyCol.id]: v };
+          const entry = link.find(v);
+          if (entry) E.fillRowFromEntry(s, row, entry, link.keyCol);
+          rows.push(row);
+          qi.value = '';
+          if (onChange) onChange();
+          draw();
+          qi.focus();
+        };
+        qi.addEventListener('input', e => { if (e.inputType === 'insertReplacementText') add(); });
+        qi.addEventListener('change', add);
+        qi.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); add(); } });
+        quick = h('tfoot', {}, h('tr', { class: 'quick-add' }, h('td', { colspan: cols.length + 1 }, qi)));
+      }
       return h('div', { class: 'list-wrap' },
         link && !readonly ? h('datalist', { id: listId }, [...link.map.keys()].map(k => h('option', { value: k }))) : null,
         h('table', { class: 'list' },
           h('thead', {}, h('tr', {}, cols.map(c => h('th', {}, c.label || c.id)), readonly ? null : h('th'))),
-          tbody),
+          tbody, quick),
         readonly ? null : h('button', { type: 'button', class: 'add-row',
           onclick: () => { rows.push({}); if (onChange) onChange(); draw(); } }, '+ 줄 추가'));
     }

@@ -546,13 +546,20 @@
       const dlId = link ? 'tdl-' + Math.random().toString(36).slice(2, 9) : null;
       const cellInput = (row, c) => {
         if (link && c === link.keyCol) {
-          return h('input', { value: row[c.id] ?? '', list: dlId, placeholder: `${link.keyField.label || '이름'} 입력`, oninput: e => {
-            const v = e.target.value;
+          // 확정할 때(목록에서 고르기·Enter·다른 곳 누르기)만 불러옴 — 한글 조합 중에 끊기지 않게
+          const el = h('input', { value: row[c.id] ?? '', list: dlId, placeholder: `${link.keyField.label || '이름'} 입력` });
+          const commit = () => {
+            const entry = link.find(el.value);
+            if (entry) { E.fillRowFromEntry(l, row, entry, link.keyCol); sync(); changed(); drawEditor(); }
+          };
+          el.addEventListener('input', e => {
+            const v = el.value;
             if (v === '') delete row[c.id]; else row[c.id] = v;
-            const entry = link.find(v);
-            if (entry) { E.fillRowFromEntry(l, row, entry, link.keyCol); sync(); changed(); drawEditor(); return; }
             sync(); changed();
-          } });
+            if (e.inputType === 'insertReplacementText') commit();
+          });
+          el.addEventListener('change', commit);
+          return el;
         }
         if (link && c.from && link.find(row[link.keyCol.id])) {
           return h('div', { class: 'linked-cell is-linked', title: '데이터 보관함에서 불러온 값' }, String(row[c.id] ?? ''));
@@ -567,7 +574,8 @@
       return h('div', { class: 'default-rows' },
         link ? h('datalist', { id: dlId }, [...link.map.keys()].map(k => h('option', { value: k }))) : null,
         h('div', { class: 'sub-title' }, '처음부터 들어 있을 줄 ', h('span', { class: 'muted' }, link
-          ? `(${link.keyField.label || '이름'}을 입력하면 체크한 항목이 자동으로 채워져요)` : '(예: 기본 기능 목록. 비워 둬도 돼요)')),
+          ? `(선택 — 비워 둬도 돼요. 캐릭터 시트의 이 표에서 ${link.keyField.label || '이름'}을 적으면 체크한 항목이 자동으로 채워져요. 모든 캐릭터가 처음부터 가져야 하는 것만 여기에 넣어요)`
+          : '(예: 기본 기능 목록. 비워 둬도 돼요)')),
         l.defaultRows.length ? h('div', { class: 'list-wrap' }, h('table', { class: 'list mini' },
           h('thead', {}, h('tr', {}, cols.map(c => h('th', {}, c.label || c.id)), h('th'))),
           h('tbody', {}, l.defaultRows.map((row, i) => h('tr', {}, cols.map(c => h('td', {}, cellInput(row, c))),

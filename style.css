@@ -34,7 +34,7 @@ a { color: var(--accent); }
 .brand { font-weight: 700; text-decoration: none; color: var(--ink); }
 .topbar nav a { margin-left: 16px; text-decoration: none; color: var(--muted); }
 .topbar nav a:hover { color: var(--ink); }
-main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 80px; }
+main { max-width: var(--page-max, 1080px); margin: 0 auto; padding: 24px 16px 80px; }
 
 /* 공통 부품 */
 .card {
@@ -600,3 +600,11 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .options-editor { display: grid; gap: 4px; }
 .options-editor .row { align-items: center; }
 .data-table select { min-width: 110px; }
+
+/* ================= 화면 폭 · 표 빠른 추가 ================= */
+.view-card { margin-bottom: 16px; }
+.view-card .row { align-items: center; }
+.view-card input[type="range"] { flex: 1 1 200px; width: auto; accent-color: var(--accent); }
+table.list tfoot .quick-add td { padding-top: 6px; border-top: 1px dashed var(--line); }
+.quick-add-input { border-style: dashed; background: transparent; }
+.quick-add-input:focus { background: var(--field); }
