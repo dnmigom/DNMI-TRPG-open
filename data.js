@@ -164,7 +164,7 @@
           const t = f.type || 'text';
           const set = v => { if (v === '' || v == null) delete e[f.id]; else e[f.id] = v; changed(); };
           const el = t === 'textarea'
-            ? h('textarea', { rows: 2, value: e[f.id] ?? '', oninput: ev => set(ev.target.value) })
+            ? A.autoGrow(h('textarea', { value: e[f.id] ?? '', oninput: ev => set(ev.target.value) }))
             : h('input', { type: t === 'number' ? 'number' : 'text', value: e[f.id] ?? '',
               class: i === 0 ? 'key-input' : '',
               oninput: ev => set(t === 'number' && ev.target.value !== '' ? Number(ev.target.value) : ev.target.value) });

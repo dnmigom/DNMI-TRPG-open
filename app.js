@@ -34,6 +34,26 @@
     clearTimeout(toast.timer);
     toast.timer = setTimeout(() => (t.className = ''), isError ? 6000 : 2500);
   }
+  // 긴 글 칸: 처음엔 한 줄 높이, 글이 길어지면 그만큼만 늘어남
+  function grow(el) {
+    if (!el.isConnected) return;
+    el.style.height = 'auto';
+    const b = el.offsetHeight - el.clientHeight; // 테두리 두께
+    el.style.height = (el.scrollHeight + b) + 'px';
+  }
+  function autoGrow(el) {
+    el.rows = 1;
+    el.classList.add('auto-grow');
+    requestAnimationFrame(() => grow(el));
+    return el;
+  }
+  document.addEventListener('input', e => { if (e.target.classList && e.target.classList.contains('auto-grow')) grow(e.target); });
+  let growTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(growTimer);
+    growTimer = setTimeout(() => document.querySelectorAll('textarea.auto-grow').forEach(grow), 150);
+  });
+
   function show(...nodes) { applyTheme(null); app.replaceChildren(...nodes.flat(Infinity).filter(n => n != null && n !== false)); window.scrollTo(0, 0); }
   function loading(text) { show(h('p', { class: 'muted center' }, text || '불러오는 중…')); }
   function failed(err) {
@@ -992,8 +1012,8 @@
           onchange: e => { set(e.target.checked); changed(); } });
       }
       if (type === 'textarea') {
-        return h('textarea', { rows: rows || 5, value: value ?? '', readOnly: readonly,
-          oninput: e => { set(e.target.value); changed(); } });
+        return autoGrow(h('textarea', { value: value ?? '', readOnly: readonly,
+          oninput: e => { set(e.target.value); changed(); } }));
       }
       if (type === 'number') {
         return h('input', { type: 'number', inputmode: 'decimal', value: value ?? '', readOnly: readonly,
@@ -1110,7 +1130,7 @@
     h, toast, show, loading, failed, go, setDirty, state, routes,
     readJson, writeJson, deleteFile, listDir, loadTemplates,
     resetTemplates: () => { templateCache = null; },
-    renderSheet, blankSheet, charactersUsing, loadDatasets, refreshShares,
+    renderSheet, blankSheet, charactersUsing, loadDatasets, refreshShares, autoGrow,
     resetDatasets: () => { datasetCache = null; },
     fileKey: rule => String(rule || '').trim().replace(/[\\/:*?"<>|#%&\s]+/g, '-').replace(/^-+|-+$/g, '') || 'data',
   };

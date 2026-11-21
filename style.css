@@ -118,9 +118,12 @@ input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent);
 .field.wide { grid-column: 1 / -1; }
 .field.is-check { flex-direction: row-reverse; justify-content: flex-end; align-items: center; gap: 8px; }
 .field.is-check > span { font-size: 14px; color: var(--ink); }
-.fields.stack .field { flex-direction: row; justify-content: space-between; align-items: center; }
-.fields.stack .field > span { font-size: 14px; color: var(--ink); }
-.fields.stack .field input { max-width: 140px; }
+/* 한 줄에 하나씩: 칸 이름은 칸 위에, 칸은 가로로 꽉 차게 (체크 칸만 이름 옆에) */
+.fields.stack { gap: 14px; }
+.fields.stack .field:not(.is-check) > span { font-size: 13px; font-weight: 600; color: var(--ink); }
+.fields.stack .field input[type="number"] { max-width: 200px; }
+.fields.stack .field .with-max { max-width: 320px; }
+.fields.stack .field > output.computed { align-self: flex-start; min-width: 80px; padding: 8px 18px; }
 
 output.computed {
   display: block; padding: 8px 10px; border-radius: 8px; font-weight: 700;
@@ -419,3 +422,6 @@ table.list.mini td input { min-width: 60px; }
 .linked-cell.is-linked { color: var(--ink); background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 6px; padding: 6px 8px; }
 table.list td textarea { min-width: 160px; font-size: 13px; }
 @media (max-width: 860px) { .data-layout { grid-template-columns: 1fr; } }
+
+/* 긴 글 칸: 글자 칸과 같은 높이에서 시작해서 내용만큼 늘어남 */
+textarea.auto-grow { resize: none; overflow: hidden; line-height: 1.25; min-height: 0; }
