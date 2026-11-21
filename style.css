@@ -481,3 +481,17 @@ input[readonly]::placeholder, textarea[readonly]::placeholder { color: var(--mut
 .drag-source { opacity: .3; }
 .drop-marker { height: 4px; border-radius: 2px; background: var(--accent); margin: -2px 0; }
 body.dragging, body.dragging * { cursor: grabbing !important; user-select: none !important; }
+
+/* ================= 숨긴 묶음 · 끌어서 옮기기 공통 ================= */
+.folded-card { border-style: dashed; background: color-mix(in srgb, var(--card) 70%, transparent); }
+.folded-section > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.folded-section > summary::-webkit-details-marker { display: none; }
+.folded-section > summary h2 { margin: 0; }
+.folded-section > summary::after { content: '▸'; color: var(--muted); margin-left: auto; transition: transform .15s; }
+.folded-section[open] > summary::after { transform: rotate(90deg); }
+.folded-section[open] > summary { margin-bottom: 14px; }
+.tpl-section.is-folded { border-style: dashed; }
+.section-list, .col-list, .row-list, .part-list { display: grid; gap: 10px; }
+.section-list { gap: 12px; }
+.part-list { gap: 6px; }
+.drag-ghost.card { padding: 10px 14px; }

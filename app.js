@@ -1013,6 +1013,7 @@
 
   // ---------------- 시트 그리기 (모든 룰 공통) ----------------
   const openFolds = new WeakSet(); // 펼쳐 둔 "숨긴 칸"은 다시 그려도 펼친 채로
+  const openSections = new WeakSet(); // 펼쳐 둔 "숨긴 묶음"도 마찬가지
   function renderSheet(template, sheet, { readonly, onChange, accent, datasets }) {
     sheet.values = sheet.values || {};
     sheet.lists = sheet.lists || {};
@@ -1149,11 +1150,20 @@
     if (accent || template.accent) root.style.setProperty('--accent', accent || template.accent);
 
     const cards = (template.sections || []).map(s => {
-      const card = h('section', { class: 'card' + (s.wide ? ' wide' : '') }, h('h2', {}, s.title || ''));
-      if (s.type === 'list') listSections.push([card, s]);
-      else fieldSections.push([card, s]);
+      // 숨긴 묶음: 읽기·공유 화면에서는 아예 빼고, 편집할 때는 접힌 카드로 (눌러서 펼침)
+      if (s.folded && readonly) return null;
+      const card = h('section', { class: 'card' + (s.wide ? ' wide' : '') + (s.folded ? ' folded-card' : '') });
+      let target = card;
+      if (s.folded) {
+        target = h('details', { class: 'folded-section', open: openSections.has(s),
+          ontoggle: e => { if (e.target.open) openSections.add(s); else openSections.delete(s); } },
+          h('summary', {}, h('h2', {}, s.title || ''), h('span', { class: 'muted small' }, '숨긴 묶음')));
+        card.append(target);
+      } else card.append(h('h2', {}, s.title || ''));
+      if (s.type === 'list') listSections.push([target, s]);
+      else fieldSections.push([target, s]);
       return card;
-    });
+    }).filter(Boolean);
     for (const [card, s] of fieldSections) {
       const layout = 'fields ' + (s.layout === 'stack' ? 'stack' : 'grid');
       const shown = (s.fields || []).filter(f => !f.folded), folded = (s.fields || []).filter(f => f.folded);
@@ -1175,12 +1185,116 @@
     return root;
   }
 
+  // ---------------- 끌어서 순서 바꾸기 (룰 틀 편집기·데이터 보관함 공통) ----------------
+  // dropList(요소, 배열, 묶음키): 이 요소 안의 .drag-item들이 배열의 순서를 나타냄. 묶음키가 같은 목록끼리만 옮길 수 있음
+  // draggable(요소, 객체, { onMoved, canMove, ghost }): ⠿ 손잡이 또는 빈 곳을 꾹 눌러 끌기
+  const dragHandle = () => h('span', { class: 'drag-handle', title: '꾹 누른 채로 끌어서 옮기기' }, '⠿');
+  function dropList(el, arr, group) {
+    el.classList.add('drop-list');
+    el._arr = arr; el._group = group;
+    return el;
+  }
+  function draggable(item, obj, opts) {
+    opts = opts || {};
+    item.classList.add('drag-item');
+    item._obj = obj;
+    item.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e._dragClaimed) return;
+      const onHandle = e.target.closest('.drag-handle');
+      if (onHandle && onHandle.closest('.drag-item') !== item) return; // 안쪽 항목의 손잡이
+      if (!onHandle && (e.pointerType === 'touch' || e.target.closest('input, textarea, select, button, a, summary, label, .formula-wrap, .formula-helper, .tpl-chips'))) return;
+      e._dragClaimed = true;
+      const sx = e.clientX, sy = e.clientY;
+      let timer = setTimeout(() => { timer = null; stop(); startDrag(item, obj, opts, sx, sy); }, onHandle ? 150 : 350);
+      const move = ev => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) stop(); };
+      function stop() {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', stop);
+        window.removeEventListener('pointercancel', stop);
+      }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', stop);
+      window.addEventListener('pointercancel', stop);
+    });
+    return item;
+  }
+  function startDrag(item, obj, opts, x0, y0) {
+    const src = item.parentElement && item.parentElement.closest('.drop-list');
+    if (!src) return;
+    const group = src._group;
+    const shape = (opts.ghost && opts.ghost()) || item;
+    const rect = item.getBoundingClientRect();
+    const ghost = shape.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    const gw = shape === item ? rect.width : Math.min(rect.width, 420);
+    Object.assign(ghost.style, { width: gw + 'px', left: rect.left + 'px', top: rect.top + 'px' });
+    document.body.append(ghost);
+    item.classList.add('drag-source');
+    document.body.classList.add('dragging');
+    const marker = h('div', { class: 'drop-marker' });
+    let target = null, lastX = x0, lastY = y0, raf = 0;
+    const dx = Math.min(x0 - rect.left, gw - 10), dy = Math.min(y0 - rect.top, 30);
+    function findList(el) {
+      let l = el && el.closest('.drop-list');
+      while (l && l._group !== group) l = l.parentElement && l.parentElement.closest('.drop-list');
+      return l;
+    }
+    function update() {
+      ghost.style.left = (lastX - dx) + 'px';
+      ghost.style.top = (lastY - dy) + 'px';
+      const list = findList(document.elementFromPoint(lastX, lastY));
+      if (!list) { marker.remove(); target = null; return; }
+      const items = [...list.children].filter(c => c.classList.contains('drag-item') && c !== item);
+      let idx = items.findIndex(c => { const r = c.getBoundingClientRect(); return lastY < r.top + r.height / 2; });
+      if (idx < 0) idx = items.length;
+      if (idx < items.length) list.insertBefore(marker, items[idx]); else list.append(marker);
+      target = { list, idx };
+    }
+    // 화면 위·아래 끝에 대고 있으면 계속 스크롤
+    function edgeScroll() {
+      const edge = 70, wh = window.innerHeight;
+      const speed = lastY < edge ? -Math.ceil((edge - lastY) / 4) : lastY > wh - edge ? Math.ceil((lastY - (wh - edge)) / 4) : 0;
+      if (speed) { window.scrollBy(0, speed); update(); }
+      raf = requestAnimationFrame(edgeScroll);
+    }
+    raf = requestAnimationFrame(edgeScroll);
+    const onMove = ev => { ev.preventDefault(); lastX = ev.clientX; lastY = ev.clientY; update(); };
+    const onScroll = () => update();
+    function onUp() {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      ghost.remove(); marker.remove();
+      item.classList.remove('drag-source');
+      document.body.classList.remove('dragging');
+      if (!target) return;
+      const from = src._arr, to = target.list._arr;
+      const oldIdx = from.indexOf(obj);
+      if (oldIdx < 0) return;
+      if (from === to && oldIdx === target.idx) return;
+      if (opts.canMove && !opts.canMove({ from, to, oldIdx, newIdx: target.idx })) return;
+      from.splice(oldIdx, 1);
+      to.splice(Math.min(target.idx, to.length), 0, obj);
+      if (opts.onMoved) opts.onMoved({ from, to, oldIdx, newIdx: target.idx });
+    }
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    update();
+  }
+
   // 다른 파일(editor.js)이 쓸 수 있도록 내부 도구를 내보냄
   window.SheetApp = {
     h, toast, show, loading, failed, go, setDirty, state, routes,
     readJson, writeJson, deleteFile, listDir, loadTemplates,
     resetTemplates: () => { templateCache = null; },
     renderSheet, blankSheet, charactersUsing, loadDatasets, refreshShares, autoGrow,
+    dragHandle, dropList, draggable,
     resetDatasets: () => { datasetCache = null; },
     fileKey: rule => String(rule || '').trim().replace(/[\\/:*?"<>|#%&\s]+/g, '-').replace(/^-+|-+$/g, '') || 'data',
   };

@@ -103,7 +103,7 @@
       schemaCard.replaceChildren(
         h('div', { class: 'section-head' }, h('span', { class: 'section-kind' }, '항목'), h('strong', { class: 'grow' }, '항목 구성')),
         h('p', { class: 'muted small', style: 'margin:0' }, '데이터마다 들어갈 칸을 정해요. 예: 이름 / 사용 횟수 / 효과 / 해설, 또는 이름 / 개요'),
-        ...draft.fields.map((f, i) => {
+        A.dropList(h('div', { class: 'row-list' }, draft.fields.map((f, i) => {
           const idInput = h('input', { class: 'id-input', value: f.id, spellcheck: false });
           idInput.addEventListener('change', () => {
             const v = idInput.value.trim();
@@ -112,16 +112,9 @@
             if (v !== f.id && !fieldGuard(f, '이름을 바꿀')) { idInput.value = f.id; return; }
             manual.add(f); renameField(f, v); changed(); drawTable();
           });
-          const move = d => () => {
-            const j = i + d;
-            if (j < 0 || j >= draft.fields.length) return;
-            if ((i === 0 || j === 0) && usedBy.length) return A.toast('룰 틀에 연결된 데이터라 찾기 이름(첫 번째 항목)은 바꿀 수 없어요.', true);
-            [draft.fields[i], draft.fields[j]] = [draft.fields[j], draft.fields[i]];
-            changed(); drawSchema(); drawTable();
-          };
-          return h('div', { class: 'tpl-item' + (i === 0 ? ' is-formula' : '') },
+          return A.draggable(h('div', { class: 'tpl-item' + (i === 0 ? ' is-formula' : '') },
             i === 0 ? h('span', { class: 'link-tag' }, '🔎 찾기 이름 — 룰 틀에서 이 항목으로 데이터를 찾아요') : null,
-            h('div', { class: 'item-head' },
+            h('div', { class: 'item-head' }, A.dragHandle(),
               h('input', { class: 'label-input', value: f.label || '', placeholder: '항목 이름', oninput: e => {
                 f.label = e.target.value;
                 if (fresh.has(f) && !manual.has(f)) { renameField(f, idFrom(e.target.value, taken(f))); idInput.value = f.id; }
@@ -129,8 +122,6 @@
               } }),
               h('select', { class: 'kind', onchange: e => { f.type = e.target.value; changed(); drawTable(); } },
                 TYPES.map(([v, l]) => h('option', { value: v, selected: (f.type || 'text') === v }, l))),
-              h('button', { type: 'button', class: 'icon-btn', title: '위로', onclick: move(-1) }, '↑'),
-              h('button', { type: 'button', class: 'icon-btn', title: '아래로', onclick: move(1) }, '↓'),
               h('button', { type: 'button', class: 'icon-btn danger', title: '항목 삭제', onclick: () => {
                 if (draft.fields.length === 1) return A.toast('항목은 하나 이상 있어야 해요.', true);
                 if (!fieldGuard(f, '지울')) return;
@@ -140,8 +131,15 @@
                 draft.fields.splice(i, 1); changed(); drawSchema(); drawTable();
               } }, '×')),
             h('details', { class: 'more' }, h('summary', {}, '더보기'),
-              h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (룰 틀에서 연결할 때 쓰여요)'), idInput)));
-        }),
+              h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (룰 틀에서 연결할 때 쓰여요)'), idInput))), f, {
+            // 룰 틀에 연결된 데이터는 찾기 이름(첫 번째 항목)을 바꿀 수 없음
+            canMove: ({ oldIdx, newIdx }) => {
+              if ((oldIdx === 0 || newIdx === 0) && usedBy.length) { A.toast('룰 틀에 연결된 데이터라 찾기 이름(첫 번째 항목)은 바꿀 수 없어요.', true); return false; }
+              return true;
+            },
+            onMoved: () => { changed(); drawSchema(); drawTable(); },
+          });
+        })), draft.fields, 'ds-fields'),
         h('button', { type: 'button', class: 'add-row', onclick: () => {
           const f = { label: '새 항목', type: 'text' };
           f.id = idFrom('새항목', new Set(draft.fields.map(x => x.id)));

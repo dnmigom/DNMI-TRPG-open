@@ -218,12 +218,10 @@
 
     // ---------- 작은 부품 ----------
     const iconBtn = (text, title, fn, cls) => h('button', { type: 'button', class: 'icon-btn ' + (cls || ''), title, onclick: fn }, text);
-    function moveBtns(arr, i) {
-      return [
-        iconBtn('↑', '위로', () => { if (i > 0) { [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; changed(); drawEditor(); } }),
-        iconBtn('↓', '아래로', () => { if (i < arr.length - 1) { [arr[i + 1], arr[i]] = [arr[i], arr[i + 1]]; changed(); drawEditor(); } }),
-      ];
-    }
+    // 끌어서 순서 바꾸기 (⠿ 손잡이 또는 빈 곳을 꾹 눌러서)
+    const dragHandle = A.dragHandle;
+    const moved = () => { changed(); drawEditor(); };
+    const drag = (el, obj, extra) => A.draggable(el, obj, { onMoved: moved, ...(extra || {}) });
     function kindSelect(kinds, current, onPick) {
       return h('select', { class: 'kind', onchange: e => onPick(e.target.value) },
         kinds.map(([v, l]) => h('option', { value: v, selected: v === current }, l)));
@@ -413,7 +411,6 @@
             if (f.folded) delete f.folded; else f.folded = true; changed(); drawEditor();
           }, 'fold-btn' + (f.folded ? ' on' : '')),
           iconBtn('⧉', '이 칸 복제', () => duplicateField(s, i)),
-          moveBtns(s.fields, i),
           iconBtn('×', '칸 삭제', () => { if (!fieldGuard(f)) return; s.fields.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         f.folded ? h('span', { class: 'fold-tag' }, '🙈 접힌 칸 — 시트에서는 "숨긴 칸 보기"를 눌러야 보이고, 읽기 모드·공유 화면에서는 안 보여요. 수식에서는 그대로 쓸 수 있어요.') : null,
         extra,
@@ -424,8 +421,7 @@
               h('input', { value: f.hint || '', oninput: e => { if (e.target.value) f.hint = e.target.value; else delete f.hint; changed(); } })),
             h('label', { class: 'mini-check' }, h('input', { type: 'checkbox', checked: !!f.wide,
               onchange: e => { if (e.target.checked) f.wide = true; else delete f.wide; changed(); } }), '가로로 넓게'))));
-      enableDrag(item, f);
-      return item;
+      return drag(item, f);
     }
 
     // ---------- 칸 복제 (붙은 숫자까지, 수식 안의 자기 이름도 새 이름으로) ----------
@@ -449,91 +445,6 @@
       focusTarget = copy; changed(); drawEditor();
     }
 
-    // ---------- 길게 눌러 끌어서 칸 옮기기 (다른 칸 묶음으로도) ----------
-    const dragHandle = () => h('span', { class: 'drag-handle', title: '꾹 누른 채로 끌어서 옮기기' }, '⠿');
-    function enableDrag(item, f) {
-      item.addEventListener('pointerdown', e => {
-        if (e.button !== 0) return;
-        const onHandle = !!e.target.closest('.drag-handle');
-        if (!onHandle && (e.pointerType === 'touch' || e.target.closest('input, textarea, select, button, a, summary, .formula-wrap, .formula-helper, .parts-box'))) return;
-        const sx = e.clientX, sy = e.clientY;
-        let timer = setTimeout(() => { timer = null; stop(); startDrag(item, f, sx, sy, e.pointerId); }, onHandle ? 150 : 350);
-        const move = ev => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) stop(); };
-        function stop() {
-          if (timer) clearTimeout(timer);
-          timer = null;
-          window.removeEventListener('pointermove', move);
-          window.removeEventListener('pointerup', stop);
-          window.removeEventListener('pointercancel', stop);
-        }
-        window.addEventListener('pointermove', move);
-        window.addEventListener('pointerup', stop);
-        window.addEventListener('pointercancel', stop);
-      });
-    }
-    function startDrag(item, f, x0, y0, pointerId) {
-      const rect = item.getBoundingClientRect();
-      const ghost = item.cloneNode(true);
-      ghost.classList.add('drag-ghost');
-      Object.assign(ghost.style, { width: rect.width + 'px', left: rect.left + 'px', top: rect.top + 'px' });
-      document.body.append(ghost);
-      item.classList.add('drag-source');
-      document.body.classList.add('dragging');
-      const marker = h('div', { class: 'drop-marker' });
-      let target = null;
-      const dx = x0 - rect.left, dy = y0 - rect.top;
-      let lastX = x0, lastY = y0, raf = 0;
-      function update() {
-        ghost.style.left = (lastX - dx) + 'px';
-        ghost.style.top = (lastY - dy) + 'px';
-        const el = document.elementFromPoint(lastX, lastY);
-        const list = el && el.closest('.field-list');
-        if (!list) { marker.remove(); target = null; return; }
-        const items = [...list.children].filter(c => c.classList.contains('tpl-item') && c !== item);
-        let idx = items.findIndex(c => { const r = c.getBoundingClientRect(); return lastY < r.top + r.height / 2; });
-        if (idx < 0) idx = items.length;
-        if (idx < items.length) list.insertBefore(marker, items[idx]); else list.append(marker);
-        target = { sec: Number(list.dataset.sec), idx };
-      }
-      // 화면 위·아래 가장자리에 대고 있으면 계속 스크롤 (멀리 있는 칸 묶음으로 옮길 때)
-      function edgeScroll() {
-        const edge = 70, h = window.innerHeight;
-        const speed = lastY < edge ? -Math.ceil((edge - lastY) / 4) : lastY > h - edge ? Math.ceil((lastY - (h - edge)) / 4) : 0;
-        if (speed) { window.scrollBy(0, speed); update(); }
-        raf = requestAnimationFrame(edgeScroll);
-      }
-      raf = requestAnimationFrame(edgeScroll);
-      function onMove(ev) {
-        ev.preventDefault();
-        lastX = ev.clientX; lastY = ev.clientY;
-        update();
-      }
-      const onScroll = () => update();
-      window.addEventListener('scroll', onScroll, { passive: true });
-      function onUp() {
-        cancelAnimationFrame(raf);
-        window.removeEventListener('scroll', onScroll);
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-        ghost.remove(); marker.remove();
-        item.classList.remove('drag-source');
-        document.body.classList.remove('dragging');
-        if (!target) return;
-        const from = draft.sections.find(s => s.type !== 'list' && s.fields.includes(f));
-        const to = draft.sections[target.sec];
-        if (!from || !to || to.type === 'list') return;
-        const oldIdx = from.fields.indexOf(f);
-        from.fields.splice(oldIdx, 1);
-        to.fields.splice(Math.min(target.idx, to.fields.length), 0, f);
-        if (from !== to || oldIdx !== target.idx) { changed(); }
-        drawEditor();
-      }
-      window.addEventListener('pointermove', onMove, { passive: false });
-      window.addEventListener('pointerup', onUp);
-      window.addEventListener('pointercancel', onUp);
-    }
-
     // ---------- 한 칸에 숫자 여러 개 (예: 보통 / 절반 / 1/5) ----------
     const PART_KINDS = [['number', '숫자'], ['formula', '자동 계산']];
     const partGuard = p => fresh.has(p) || guard(fieldUsers(p.id), `"${labelOf(p)}" 숫자`);
@@ -549,13 +460,12 @@
           changed();
         } });
         if (focusTarget === p) requestAnimationFrame(() => { nameIn.focus(); nameIn.select(); focusTarget = null; });
-        return h('div', { class: 'part-item' },
-          h('div', { class: 'item-head' }, h('span', { class: 'part-sep' }, f.sep || '/'), nameIn,
+        return drag(h('div', { class: 'part-item' },
+          h('div', { class: 'item-head' }, dragHandle(), h('span', { class: 'part-sep' }, f.sep || '/'), nameIn,
             kindSelect(PART_KINDS, pk, v => {
               if (v === 'formula' && !partGuard(p)) return drawEditor();
               applyKind(p, v); changed(); drawEditor();
             }),
-            moveBtns(parts, j),
             iconBtn('×', '이 숫자 빼기', () => {
               if (!partGuard(p)) return;
               parts.splice(j, 1);
@@ -570,7 +480,7 @@
                 delete preview.values[p.id]; changed();
               } })),
           h('details', { class: 'more' }, h('summary', {}, '더보기'),
-            idEditor(p, idOut, '수식에서 부르는 이름', v => renameField(p, v), takenIds(p), () => partGuard(p))));
+            idEditor(p, idOut, '수식에서 부르는 이름', v => renameField(p, v), takenIds(p), () => partGuard(p)))), p);
       });
       return h('div', { class: 'parts-box' },
         parts.length ? h('div', { class: 'row tight' },
@@ -582,7 +492,7 @@
               changed();
               for (const el of e.target.closest('.parts-box').querySelectorAll('.part-sep')) el.textContent = f.sep || '/';
             } }))) : null,
-        rows,
+        parts.length ? A.dropList(h('div', { class: 'part-list' }, rows), parts, f) : null,
         h('button', { type: 'button', class: 'add-row small-btn', onclick: () => {
           const p = { label: parts.length ? '' : '절반', formula: parts.length ? '' : `내림(${f.id} / 2)` };
           p.id = idFrom((f.label || f.id) + (p.label || '숫자'), new Set(allFields().map(x => x.id)));
@@ -599,9 +509,9 @@
       const [label, idOut] = labelInput(c, v => renameColumn(l, c, idFrom(v, takenIds())), '열 이름');
       const ds = l.source && datasets[l.source.dataset];
       const fromField = c.from && ds && (ds.fields || []).find(x => x.id === c.from);
-      return h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') + (fromField ? ' is-linked' : '') },
+      return drag(h('div', { class: 'tpl-item' + (kind === 'formula' ? ' is-formula' : '') + (fromField ? ' is-linked' : '') },
         fromField ? h('span', { class: 'link-tag' }, (ds.fields[0].id === c.from ? '🔎 찾기 이름 · ' : '🔗 ') + `${ds.name}의 "${fromField.label || fromField.id}"`) : null,
-        h('div', { class: 'item-head' }, label,
+        h('div', { class: 'item-head' }, dragHandle(), label,
           kindSelect(COL_KINDS, kind, v => { if (v === 'formula' && !colGuard(l, c)) return drawEditor(); applyKind(c, v); changed(); drawEditor(); }),
           iconBtn('⧉', '이 열 복제', () => {
             const copy = clone(c);
@@ -610,11 +520,10 @@
             copy.id = idFrom(copy.label, new Set(l.columns.map(x => x.id)));
             fresh.add(copy); l.columns.splice(i + 1, 0, copy); focusTarget = copy; changed(); drawEditor();
           }),
-          moveBtns(l.columns, i),
           iconBtn('×', '열 삭제', () => { if (!colGuard(l, c)) return; l.columns.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         kind === 'formula' ? formulaInput(c, 'formula', { list: l, col: c, prop: 'formula' }, '예: 기본 + 투자') : null,
         h('details', { class: 'more' }, h('summary', {}, '더보기'),
-          idEditor(c, idOut, '수식에서 부르는 이름', v => renameColumn(l, c, v), takenIds, () => colGuard(l, c))));
+          idEditor(c, idOut, '수식에서 부르는 이름', v => renameColumn(l, c, v), takenIds, () => colGuard(l, c)))), c);
     }
 
     function defaultRowsEditor(l) {
@@ -732,9 +641,12 @@
       const listIdOut = { el: null };
 
       const head = h('div', { class: 'section-head' },
+        dragHandle(),
         h('span', { class: 'section-kind' }, isList ? '표' : '칸 묶음'),
         titleInput,
-        moveBtns(draft.sections, i),
+        iconBtn(s.folded ? '🙈' : '👁', s.folded ? '숨긴 묶음이에요. 눌러서 다시 보이게' : '이 묶음 전체를 시트에서 숨기기', () => {
+          if (s.folded) delete s.folded; else s.folded = true; changed(); drawEditor();
+        }, 'fold-btn' + (s.folded ? ' on' : '')),
         iconBtn('×', '삭제', () => {
           if (isList ? !listGuard(s) : !s.fields.every(f => fieldGuard(f))) return;
           const n = isList ? s.columns.length : s.fields.length;
@@ -756,7 +668,7 @@
         body = [
           dataLinkPanel(s),
           h('div', { class: 'sub-title' }, '열'),
-          s.columns.map((c, j) => columnItem(c, s, j)),
+          A.dropList(h('div', { class: 'col-list' }, s.columns.map((c, j) => columnItem(c, s, j))), s.columns, s),
           h('button', { type: 'button', class: 'add-row', onclick: () => {
             const c = { label: '새 열', type: 'number' };
             c.id = idFrom('새열', new Set(s.columns.map(x => x.id)));
@@ -766,8 +678,8 @@
         ];
       } else {
         body = [
-          h('div', { class: 'field-list', 'data-sec': String(i) }, s.fields.map((f, j) => fieldItem(f, s, j)),
-            s.fields.length ? null : h('p', { class: 'muted small empty-drop' }, '칸이 없어요. 다른 묶음의 칸을 끌어다 놓을 수도 있어요.')),
+          A.dropList(h('div', { class: 'field-list' }, s.fields.map((f, j) => fieldItem(f, s, j)),
+            s.fields.length ? null : h('p', { class: 'muted small empty-drop' }, '칸이 없어요. 다른 묶음의 칸을 끌어다 놓을 수도 있어요.')), s.fields, 'fields'),
           h('button', { type: 'button', class: 'add-row', onclick: () => {
             const f = { label: '새 칸', type: 'number' };
             f.id = idFrom('새칸', new Set(allFields().map(x => x.id)));
@@ -775,7 +687,9 @@
           } }, '+ 칸 추가'),
         ];
       }
-      return h('section', { class: 'card tpl-section' + (isList ? ' is-list' : '') }, head, opts, body);
+      return drag(h('section', { class: 'card tpl-section' + (isList ? ' is-list' : '') + (s.folded ? ' is-folded' : '') }, head,
+        s.folded ? h('span', { class: 'fold-tag' }, '🙈 숨긴 묶음 — 시트에서는 접힌 채로 보이고(눌러서 펼치기), 읽기 모드·공유 화면에서는 안 보여요.') : null,
+        opts, body), s, { ghost: () => head });
     }
 
     // ---------- 글 틀 입력칸 ({칸이름}을 넣는 글) ----------
@@ -835,21 +749,19 @@
       cc.status = cc.status || []; cc.params = cc.params || []; cc.listCommands = cc.listCommands || [];
       const lists = allLists();
 
-      const statusRows = cc.status.map((st, i) => h('div', { class: 'tpl-item' },
-        h('div', { class: 'item-head' },
+      const statusRows = cc.status.map((st, i) => drag(h('div', { class: 'tpl-item' },
+        h('div', { class: 'item-head' }, dragHandle(),
           h('input', { class: 'label-input', value: st.label || '', placeholder: '이름 (예: HP)', oninput: e => { st.label = e.target.value; changed(); } }),
-          moveBtns(cc.status, i),
           iconBtn('×', '삭제', () => { cc.status.splice(i, 1); changed(); drawEditor(); }, 'danger')),
         h('div', { class: 'row tight' },
           h('div', { class: 'mini-field grow' }, h('span', {}, '현재 값'), formulaInput(st, 'value', { expr: true }, '예: 체력')),
-          h('div', { class: 'mini-field grow' }, h('span', {}, '최대 값'), formulaInput(st, 'max', { expr: true, optional: true, emptyText: '비워 두면 최대값 0으로 보내요.' }, '예: 최대체력')))));
+          h('div', { class: 'mini-field grow' }, h('span', {}, '최대 값'), formulaInput(st, 'max', { expr: true, optional: true, emptyText: '비워 두면 최대값 0으로 보내요.' }, '예: 최대체력')))), st));
 
-      const paramRows = cc.params.map((p, i) => h('div', { class: 'tpl-item' },
-        h('div', { class: 'item-head' },
+      const paramRows = cc.params.map((p, i) => drag(h('div', { class: 'tpl-item' },
+        h('div', { class: 'item-head' }, dragHandle(),
           h('input', { class: 'label-input', value: p.label || '', placeholder: '이름 (예: 근력)', oninput: e => { p.label = e.target.value; changed(); } }),
-          moveBtns(cc.params, i),
           iconBtn('×', '삭제', () => { cc.params.splice(i, 1); changed(); drawEditor(); }, 'danger')),
-        textTemplate(p, 'value', { single: true, placeholder: '예: {근력}' })));
+        textTemplate(p, 'value', { single: true, placeholder: '예: {근력}' })), p));
 
       const listCmdRows = cc.listCommands.map((lc, i) => h('div', { class: 'tpl-item' },
         h('div', { class: 'item-head' },
@@ -870,9 +782,9 @@
             if (!confirm('직접 정한 연동 설정을 지우고 자동 설정으로 돌아갈까요?')) return;
             delete draft.ccfolia; changed(); drawEditor();
           } }, '자동 설정으로')),
-        sub('상태', '(HP·MP처럼 막대로 보이는 값. 수식)'), statusRows,
+        sub('상태', '(HP·MP처럼 막대로 보이는 값. 수식)'), A.dropList(h('div', { class: 'row-list' }, statusRows), cc.status, cc.status),
         h('button', { type: 'button', class: 'add-row', onclick: () => { cc.status.push({ label: '', value: '', max: '' }); changed(); drawEditor(); } }, '+ 상태 추가'),
-        sub('파라미터', '(능력치처럼 "이름: 값"으로 보이는 것. {칸이름}으로 값 넣기)'), paramRows,
+        sub('파라미터', '(능력치처럼 "이름: 값"으로 보이는 것. {칸이름}으로 값 넣기)'), A.dropList(h('div', { class: 'row-list' }, paramRows), cc.params, cc.params),
         h('button', { type: 'button', class: 'add-row', onclick: () => { cc.params.push({ label: '', value: '' }); changed(); drawEditor(); } }, '+ 파라미터 추가'),
         sub('이니셔티브', '(행동 순서. 수식, 비워도 돼요)'),
         formulaInput(cc, 'initiative', { expr: true, optional: true, emptyText: '비워 두면 0으로 보내요.' }, '예: 민첩'),
@@ -911,7 +823,7 @@
           h('input', { value: draft.description || '', oninput: e => { draft.description = e.target.value; changed(); } })),
         fileLabel);
       updateFileLabel();
-      editorCol.replaceChildren(meta, ...draft.sections.map(sectionCard),
+      editorCol.replaceChildren(meta, A.dropList(h('div', { class: 'section-list' }, draft.sections.map(sectionCard)), draft.sections, 'sections'),
         h('div', { class: 'row add-section' },
           h('button', { type: 'button', onclick: () => {
             const s = { title: '새 묶음', layout: 'grid', fields: [] };
