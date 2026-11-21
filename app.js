@@ -1214,13 +1214,14 @@
     if (accent || template.accent) root.style.setProperty('--accent', accent || template.accent);
     // 한 줄에 놓을 칸 묶음 수 (룰 틀마다). 화면이 좁으면 2개, 휴대폰은 1개까지 줄어듦
     const cardsPerRow = Math.floor(Number(template.cardsPerRow));
-    if (cardsPerRow >= 1) {
+    const cardRows = (template.cardRows || []).map(n => Math.floor(Number(n))).filter(n => n >= 1);
+    if (cardsPerRow >= 1 && !cardRows.length) {
       root.classList.add('fixed-cards');
       root.style.setProperty('--cards', cardsPerRow);
       root.style.setProperty('--cards-md', Math.min(cardsPerRow, 2));
     }
 
-    const cards = (template.sections || []).map(s => {
+    const cardBySection = (template.sections || []).map(s => {
       // 숨긴 묶음: 읽기·공유 화면에서는 아예 빼고, 편집할 때는 접힌 카드로 (눌러서 펼침)
       if (s.folded && readonly) return null;
       const card = h('section', { class: 'card' + (s.wide || s.type === 'grid' ? ' wide' : '') + (s.folded ? ' folded-card' : '') + (s.type === 'grid' ? ' grid-card' : '') });
@@ -1235,7 +1236,8 @@
       else if (s.type === 'list') listSections.push([target, s]);
       else fieldSections.push([target, s]);
       return card;
-    }).filter(Boolean);
+    });
+    const cards = cardBySection.filter(Boolean);
     for (const [card, s] of fieldSections) {
       // 칸 배치: 한 줄에 하나씩(stack) / 정한 칸 수(perRow) / 자동
       const perRow = Math.floor(Number(s.perRow));
@@ -1261,7 +1263,33 @@
     for (const [card, s] of listSections) card.append(renderList(s));
     for (const [card, s] of gridSections) card.append(renderGrid(s));
 
-    root.append(...cards);
+    if (cardRows.length) {
+      // 줄마다 정한 개수만큼: 룰 틀의 칸 묶음 순서대로 1번째 줄에 n개, 2번째 줄에 m개 … 나머지는 "나머지 줄" 설정대로
+      root.classList.add('row-mode');
+      const rowOf = n => {
+        const row = h('div', { class: 'sheet-row' });
+        row.style.setProperty('--cards', n);
+        row.style.setProperty('--cards-md', Math.min(n, 2));
+        return row;
+      };
+      let k = 0;
+      const take = n => { const part = cardBySection.slice(k, k + n).filter(Boolean); k += n; return part; };
+      for (const n of cardRows) {
+        if (k >= cardBySection.length) break;
+        const part = take(n);
+        // 숨긴 묶음이 빠져서 모자라면 남은 카드가 그 줄을 나눠 씀
+        if (part.length) { const row = rowOf(Math.min(n, part.length)); row.append(...part); root.append(row); }
+      }
+      while (k < cardBySection.length) {
+        if (cardsPerRow >= 1) {
+          const part = take(cardsPerRow);
+          if (part.length) { const row = rowOf(Math.min(cardsPerRow, part.length)); row.append(...part); root.append(row); }
+        } else {
+          const rest = cardBySection.slice(k).filter(Boolean); k = cardBySection.length;
+          if (rest.length) root.append(h('div', { class: 'sheet-row auto' }, rest));
+        }
+      }
+    } else root.append(...cards);
     recompute();
     return root;
   }

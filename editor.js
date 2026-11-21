@@ -965,6 +965,44 @@
       return card;
     }
 
+    // ---------- 줄마다 칸 묶음 수 ----------
+    function cardRowsEditor() {
+      draft.cardRows = draft.cardRows || [];
+      const rows = draft.cardRows;
+      const names = draft.sections.map(x => x.title || (x.type === 'grid' ? '특기표' : '(이름 없음)'));
+      // 어떤 칸 묶음이 몇째 줄에 들어가는지 미리 보여 줌
+      let k = 0;
+      const rowItems = rows.map((n, idx) => {
+        const these = names.slice(k, k + n); k += n;
+        return h('div', { class: 'card-row-item' },
+          h('span', { class: 'row-no' }, `${idx + 1}줄`),
+          h('input', { type: 'number', min: 1, max: 6, value: n, style: 'width:64px', oninput: e => {
+            const v = Math.floor(Number(e.target.value));
+            if (v >= 1) { rows[idx] = Math.min(v, 6); changed(); clearTimeout(cardRowsEditor.t); cardRowsEditor.t = setTimeout(drawEditor, 400); }
+          } }),
+          h('span', { class: 'muted small' }, '개'),
+          h('span', { class: 'row-names' }, these.length ? these.join(' · ') : '(남은 칸 묶음 없음)'),
+          iconBtn('×', '이 줄 설정 빼기', () => { rows.splice(idx, 1); if (!rows.length) delete draft.cardRows; changed(); drawEditor(); }, 'danger'));
+      });
+      const rest = names.slice(k);
+      const restInput = h('input', { type: 'number', min: 1, max: 6, step: 1, style: 'width:90px', placeholder: '자동',
+        value: draft.cardsPerRow || '', oninput: e => {
+          const n = Math.floor(Number(e.target.value));
+          if (n >= 1) draft.cardsPerRow = Math.min(n, 6); else delete draft.cardsPerRow;
+          changed();
+        } });
+      return h('div', { class: 'card-rows' },
+        h('div', { class: 'sub-title' }, '시트의 줄마다 놓을 칸 묶음 수 ', h('span', { class: 'muted' }, '(칸 묶음 순서대로 채워져요)')),
+        rowItems,
+        h('div', { class: 'card-row-item rest' },
+          h('span', { class: 'row-no' }, rows.length ? '나머지' : '모든 줄'),
+          restInput, h('span', { class: 'muted small' }, '개씩 (비우면 자동)'),
+          rows.length && rest.length ? h('span', { class: 'row-names' }, rest.join(' · ')) : null),
+        h('button', { type: 'button', class: 'small-btn', onclick: () => {
+          rows.push(Number(draft.cardsPerRow) || 2); draft.cardRows = rows; changed(); drawEditor();
+        } }, rows.length ? '+ 줄 추가' : '+ 줄마다 따로 정하기'));
+    }
+
     // ---------- 편집기 전체 그리기 ----------
     const editorCol = h('div', { class: 'tpl-editor' });
     const previewBody = h('div', { class: 'tpl-preview-body' });
@@ -983,14 +1021,8 @@
         h('div', { class: 'row tight' },
           h('label', { class: 'mini-field grow' }, h('span', {}, '설명 (룰 고를 때 보이는 한 줄)'),
             h('input', { value: draft.description || '', oninput: e => { draft.description = e.target.value; changed(); } })),
-          h('label', { class: 'mini-field' }, h('span', {}, '한 줄에 놓을 칸 묶음 수'),
-            h('input', { type: 'number', min: 1, max: 6, step: 1, style: 'width:130px', placeholder: '비우면 자동',
-              value: draft.cardsPerRow || '', title: '시트에서 칸 묶음(카드)을 한 줄에 몇 개씩 놓을지. 비우면 화면 너비에 맞춰 자동',
-              oninput: e => {
-                const n = Math.floor(Number(e.target.value));
-                if (n >= 1) draft.cardsPerRow = Math.min(n, 6); else delete draft.cardsPerRow;
-                changed();
-              } }))),
+        ),
+        cardRowsEditor(),
         fileLabel);
       updateFileLabel();
       editorCol.replaceChildren(meta, A.dropList(h('div', { class: 'section-list' }, draft.sections.map(sectionCard)), draft.sections, 'sections'),
@@ -1066,6 +1098,7 @@
       const t = clone(draft);
       t.rule = String(t.rule).trim();
       if (!t.description) delete t.description;
+      if (!(t.cardRows || []).length) delete t.cardRows;
       for (const s of t.sections) {
         if (!s.wide) delete s.wide;
         for (const x of [...(s.fields || []), ...(s.columns || [])]) {
