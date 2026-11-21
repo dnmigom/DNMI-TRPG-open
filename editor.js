@@ -767,6 +767,10 @@
         iconBtn(s.folded ? '🙈' : '👁', s.folded ? '숨긴 묶음이에요. 눌러서 다시 보이게' : '이 묶음 전체를 시트에서 숨기기', () => {
           if (s.folded) delete s.folded; else s.folded = true; changed(); drawEditor();
         }, 'fold-btn' + (s.folded ? ' on' : '')),
+        isList ? null : iconBtn('⇲', '다른 칸 묶음과 합치기', () => {
+          if (mergeOpen.has(s)) mergeOpen.delete(s); else mergeOpen.add(s);
+          drawEditor();
+        }, 'merge-btn' + (mergeOpen.has(s) ? ' on' : '')),
         iconBtn('×', '삭제', () => {
           if (isList ? !listGuard(s) : !s.fields.every(f => fieldGuard(f))) return;
           const n = isList ? s.columns.length : s.fields.length;
@@ -815,8 +819,38 @@
         ];
       }
       return drag(h('section', { class: 'card tpl-section' + (isList ? ' is-list' : '') + (s.folded ? ' is-folded' : '') }, head,
+        !isList && mergeOpen.has(s) ? mergePanel(s) : null,
         s.folded ? h('span', { class: 'fold-tag' }, '🙈 숨긴 묶음 — 시트에서는 접힌 채로 보이고(눌러서 펼치기), 읽기 모드·공유 화면에서는 안 보여요.') : null,
         opts, body), s, { ghost: () => head });
+    }
+
+    // ---------- 칸 묶음 합치기: 이 묶음의 칸을 모두 다른 묶음으로 옮기고, 빈 묶음은 없앰 ----------
+    const mergeOpen = new WeakSet();
+    function mergePanel(s) {
+      const targets = draft.sections.filter(x => x !== s && x.type !== 'list' && x.type !== 'grid');
+      if (!targets.length) {
+        return h('div', { class: 'merge-panel' }, h('span', { class: 'muted small' }, '합칠 다른 칸 묶음이 없어요.'),
+          h('button', { type: 'button', class: 'small-btn', onclick: () => { mergeOpen.delete(s); drawEditor(); } }, '닫기'));
+      }
+      const target = h('select', {}, targets.map(x => h('option', { value: String(draft.sections.indexOf(x)) }, x.title || '(이름 없음)')));
+      const where = h('select', {}, h('option', { value: 'end' }, '맨 뒤에'), h('option', { value: 'start' }, '맨 앞에'));
+      return h('div', { class: 'merge-panel' },
+        h('span', {}, `이 묶음의 칸 ${s.fields.length}개를`), target, h('span', {}, '묶음의'), where,
+        h('span', {}, '넣고, 이 묶음은 없애요.'),
+        h('div', { class: 'row tight' },
+          h('button', { type: 'button', class: 'primary small-btn', onclick: () => {
+            const to = draft.sections[Number(target.value)];
+            if (!to) return;
+            const moving = s.fields.slice();
+            // 숨긴 묶음에서 옮기는 칸은 계속 숨겨지도록 접힌 칸으로
+            if (s.folded && !to.folded) moving.forEach(f => { f.folded = true; });
+            to.fields = where.value === 'start' ? [...moving, ...to.fields] : [...to.fields, ...moving];
+            draft.sections.splice(draft.sections.indexOf(s), 1);
+            mergeOpen.delete(s);
+            changed(); drawEditor();
+            A.toast(`"${s.title || '이름 없음'}"의 칸 ${moving.length}개를 "${to.title || '이름 없음'}"에 합쳤어요. 마음에 안 들면 저장하기 전에 페이지를 나가면 돼요.`);
+          } }, '합치기'),
+          h('button', { type: 'button', class: 'small-btn', onclick: () => { mergeOpen.delete(s); drawEditor(); } }, '취소')));
     }
 
     // ---------- 글 틀 입력칸 ({칸이름}을 넣는 글) ----------

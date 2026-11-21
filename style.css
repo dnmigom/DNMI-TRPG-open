@@ -569,3 +569,13 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none 
 .back-link { font-size: 13px; color: var(--muted); text-decoration: none; }
 .back-link:hover { color: var(--accent); }
 .save-list-btn { white-space: nowrap; }
+
+/* ================= 칸 묶음 합치기 ================= */
+.merge-panel {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px;
+  padding: 10px; border-radius: 10px; border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.merge-panel select { width: auto; padding: 4px 8px; }
+.merge-panel .row { width: 100%; }
+.merge-btn.on { background: color-mix(in srgb, var(--accent) 15%, transparent); }
