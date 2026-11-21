@@ -122,8 +122,34 @@
   const repoBase = () => `/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}`;
   const contentsPath = p => `${repoBase()}/contents/${p.split('/').map(encodeURIComponent).join('/')}`;
 
+  // 방금 저장한 파일 기억하기: GitHub은 저장 직후 잠깐(몇 초~1분) 예전 내용을 돌려줄 때가 있어서,
+  // 이 브라우저에서 3분 안에 저장한 파일은 GitHub이 예전 것을 주더라도 방금 저장한 내용을 씀 (탭끼리도 공유)
+  const RECENT_KEY = 'trpg-recent-writes', RECENT_MS = 3 * 60 * 1000;
+  const memRecent = new Map();
+  function recentAll() {
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(RECENT_KEY)) || {}; } catch {}
+    for (const [k, v] of memRecent) if (!all[k] || all[k].at < v.at) all[k] = v;
+    const now = Date.now();
+    for (const k of Object.keys(all)) if (now - all[k].at > RECENT_MS) delete all[k];
+    return all;
+  }
+  function rememberWrite(path, entry) {
+    entry.at = Date.now();
+    memRecent.set(path, entry);
+    try {
+      const all = recentAll();
+      all[path] = entry;
+      localStorage.setItem(RECENT_KEY, JSON.stringify(all));
+    } catch { /* 저장 공간이 모자라면 이 탭에서만 기억 */ }
+  }
+  const recentOf = path => recentAll()[path] || null;
+
   async function readJson(path) {
+    const rec = recentOf(path);
+    if (rec && rec.deleted) { const e = new Error(`${path} 파일이 없어요.`); e.status = 404; throw e; }
     const d = await gh(contentsPath(path));
+    if (rec && rec.sha && d.sha !== rec.sha) return { data: JSON.parse(JSON.stringify(rec.data)), sha: rec.sha };
     let text;
     if (d.content) text = b64decode(d.content);
     else { // 1MB가 넘는 파일은 content가 비어 있어서 raw로 다시 받음
@@ -137,14 +163,25 @@
     const body = { message, content: b64encode(JSON.stringify(obj, null, 2) + '\n') };
     if (sha) body.sha = sha;
     const d = await gh(contentsPath(path), { method: 'PUT', body });
+    rememberWrite(path, { sha: d.content.sha, data: obj });
     return d.content.sha;
   }
   async function deleteFile(path, sha, message) {
     await gh(contentsPath(path), { method: 'DELETE', body: { message, sha } });
+    rememberWrite(path, { deleted: true });
   }
   async function listDir(path) {
-    try { const d = await gh(contentsPath(path)); return Array.isArray(d) ? d : []; }
-    catch (e) { if (e.status === 404) return []; throw e; }
+    let list;
+    try { const d = await gh(contentsPath(path)); list = Array.isArray(d) ? d : []; }
+    catch (e) { if (e.status === 404) list = []; else throw e; }
+    // 방금 만든 파일은 목록에 아직 없을 수 있고, 방금 지운 파일은 아직 남아 있을 수 있어서 맞춰 줌
+    const all = recentAll(), prefix = path + '/';
+    list = list.filter(f => !(all[f.path] && all[f.path].deleted));
+    for (const [p, v] of Object.entries(all)) {
+      if (v.deleted || !p.startsWith(prefix) || p.slice(prefix.length).includes('/')) continue;
+      if (!list.some(f => f.path === p)) list.push({ type: 'file', name: p.slice(prefix.length), path: p, sha: v.sha });
+    }
+    return list;
   }
 
   // ---------------- 템플릿 ----------------
@@ -731,7 +768,7 @@
     loading();
     let char, sha, templates, datasets;
     try {
-      [{ data: char, sha }, templates, datasets] = await Promise.all([readJson(charPath(id)), loadTemplates(), loadDatasets()]);
+      [{ data: char, sha }, templates, datasets] = await Promise.all([readJson(charPath(id)), loadTemplates(true), loadDatasets(true)]);
     } catch (e) { return failed(e); }
     char.images = char.images || {};
     char.sheets = char.sheets || {};
@@ -998,6 +1035,31 @@
     drawColorBar();
     applyTheme(themeOf(char.colors, char.theme));
     selectSheet(currentKey);
+
+    // 다른 탭에서 룰 틀·데이터를 고치고 돌아오면 새 룰 틀로 다시 그림 (입력해 둔 값은 그대로)
+    let checking = false, lastCheck = Date.now();
+    const sig = () => JSON.stringify(Object.keys(char.sheets).map(k => [templates[k], datasets]));
+    async function recheck() {
+      if (!document.body.contains(head)) {
+        document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible);
+        return;
+      }
+      if (checking || document.hidden || Date.now() - lastCheck < 1500) return;
+      checking = true; lastCheck = Date.now();
+      try {
+        const before = sig();
+        const [t2, d2] = await Promise.all([loadTemplates(true), loadDatasets(true)]);
+        templates = t2; datasets = d2;
+        if (sig() !== before && document.body.contains(head)) {
+          drawTabs(); drawSheet();
+          toast('룰 틀이 바뀌어서 새 내용으로 다시 그렸어요.');
+        }
+      } catch { /* 연결이 잠깐 안 되면 다음에 다시 */ }
+      checking = false;
+    }
+    const onVisible = () => { recheck(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
 
     const keyHandler = e => {
       if (!document.body.contains(head)) return document.removeEventListener('keydown', keyHandler);
