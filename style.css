@@ -312,7 +312,8 @@ table.list.mini td input { min-width: 60px; }
 
 /* 왼쪽 인장 / 오른쪽 룰 시트. 인장 크기가 달라도 시트 모양은 그대로 */
 .char-layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
-.char-layout:has(> .portrait-panel.no-image) { grid-template-columns: minmax(0, 1fr); }
+.char-layout:has(.portrait-panel.no-image) { grid-template-columns: minmax(0, 1fr); }
+.portrait-slot:has(> .portrait-panel.no-image) { display: none; }
 .portrait-panel.no-image { display: none; }
 .portrait-slot { position: sticky; top: 70px; }
 .portrait-panel { display: grid; gap: 10px; }
@@ -425,3 +426,16 @@ table.list td textarea { min-width: 160px; font-size: 13px; }
 
 /* 긴 글 칸: 글자 칸과 같은 높이에서 시작해서 내용만큼 늘어남 */
 textarea.auto-grow { resize: none; overflow: hidden; line-height: 1.25; min-height: 0; }
+
+/* ================= 읽기 / 편집 모드 ================= */
+.mode-switch { display: inline-flex; padding: 3px; gap: 2px; border-radius: 99px; background: var(--card); border: 1px solid var(--line); }
+.mode-switch button { border: none; background: transparent; border-radius: 99px; padding: 6px 14px; font-size: 14px; color: var(--muted); }
+.mode-switch button.on { background: var(--ink); color: var(--card); }
+.mode-switch button:hover:not(.on) { color: var(--ink); }
+h1.sheet-name { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* 읽기 모드: 입력칸 테두리 없이 글처럼 */
+.reading .sheet input[readonly], .reading .sheet textarea[readonly] { padding-left: 0; font-weight: 500; }
+.reading .sheet table.list td input[readonly] { padding-left: 4px; }
+.reading .sheet .field > span { color: var(--muted); }
+input[readonly]::placeholder, textarea[readonly]::placeholder { color: var(--muted); opacity: .6; }
+.with-max input[readonly] { width: 5em; flex: none; }

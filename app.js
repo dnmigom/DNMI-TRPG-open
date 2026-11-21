@@ -622,21 +622,22 @@
   // edit: { pending: {kind: {blob, ext, url}}, onChange } 를 주면 편집 가능
   function renderPortrait(images, edit) {
     images = images || {};
-    const kinds = edit ? IMAGE_KINDS : IMAGE_KINDS.filter(([k]) => images[k]);
+    const has = k => !!(images[k] || (edit && edit.pending[k]));
+    const viewOnly = !edit || edit.viewOnly; // 읽기 모드: 있는 이미지만, 고치는 버튼 없음
+    const kinds = viewOnly ? IMAGE_KINDS.filter(([k]) => has(k)) : IMAGE_KINDS;
     const panel = h('aside', { class: 'portrait-panel' });
     if (!kinds.length) { panel.classList.add('no-image'); return panel; }
-    let current = (kinds.find(([k]) => images[k]) || kinds[0])[0];
+    let current = (kinds.find(([k]) => has(k)) || kinds[0])[0];
     const tabs = h('div', { class: 'portrait-tabs', role: 'tablist' });
     const frame = h('div', { class: 'portrait-frame' });
     const controls = h('div', { class: 'portrait-controls' });
 
-    const has = k => !!(images[k] || (edit && edit.pending[k]));
     async function srcOf(k) {
       if (edit && edit.pending[k]) return edit.pending[k].url;
       return imageSrc(images[k]);
     }
     function drawTabs() {
-      tabs.replaceChildren(...(kinds.length > 1 || edit ? kinds.map(([k, label]) => h('button', {
+      tabs.replaceChildren(...(kinds.length > 1 || !viewOnly ? kinds.map(([k, label]) => h('button', {
         type: 'button', role: 'tab', class: 'portrait-tab' + (k === current ? ' active' : '') + (has(k) ? '' : ' empty'),
         'aria-selected': String(k === current), onclick: () => { current = k; drawAll(); },
       }, label)) : []));
@@ -657,7 +658,7 @@
       }
     }
     function drawControls() {
-      if (!edit) return;
+      if (viewOnly) return;
       const k = current;
       const file = h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: async e => {
         const f = e.target.files[0];
@@ -710,6 +711,16 @@
     const replaced = new Set(); // 저장할 때 지울 예전 저장소 이미지
     const originalImages = { ...char.images };
     const markDirty = () => setDirty(true);
+
+    // 읽기 / 편집 모드 (마지막에 고른 모드를 이 브라우저에 기억)
+    let editing = false;
+    try { editing = localStorage.getItem('trpg-sheet-mode') === 'edit'; } catch {}
+    function setMode(edit) {
+      editing = edit;
+      try { localStorage.setItem('trpg-sheet-mode', edit ? 'edit' : 'read'); } catch {}
+      pickingSlot = null;
+      drawHead(); drawColorBar(); drawPortrait(); drawTabs(); drawSheet();
+    }
 
     const sheetKeys = () => Object.keys(char.sheets)
       .sort((a, b) => String(char.sheets[a].created || '').localeCompare(String(char.sheets[b].created || '')));
@@ -776,7 +787,7 @@
     const ruleTabs = h('div', { class: 'rule-tabs' });
     const sheetArea = h('div', { class: 'sheet-area' });
     function drawPortrait() {
-      portraitSlot.replaceChildren(renderPortrait(char.images, { pending, onChange: markDirty }));
+      portraitSlot.replaceChildren(renderPortrait(char.images, { pending, onChange: markDirty, viewOnly: !editing }));
     }
 
     function selectSheet(key) {
@@ -807,15 +818,16 @@
           tab.style.setProperty('--accent', themeOf(char.colors, char.theme).accent || t.accent || '');
           return tab;
         }),
-        h('button', { type: 'button', class: 'rule-tab add', onclick: () => { addBox.hidden = !addBox.hidden; } }, '+ 룰 시트 추가'),
-        addBox);
+        ...(editing ? [h('button', { type: 'button', class: 'rule-tab add', onclick: () => { addBox.hidden = !addBox.hidden; } }, '+ 룰 시트 추가'), addBox] : []));
     }
 
     function drawSheet() {
       const key = currentKey;
       if (!key) {
         sheetArea.replaceChildren(h('div', { class: 'card empty-sheet' },
-          h('p', {}, '아직 이 캐릭터의 룰 시트가 없어요.'), h('p', { class: 'muted' }, '위의 "+ 룰 시트 추가"에서 룰을 골라 주세요.')));
+          h('p', {}, '아직 이 캐릭터의 룰 시트가 없어요.'),
+          editing ? h('p', { class: 'muted' }, '위의 "+ 룰 시트 추가"에서 룰을 골라 주세요.')
+            : h('button', { class: 'primary', onclick: () => setMode(true) }, '편집 모드로 바꿔서 룰 시트 추가하기')));
         return;
       }
       const sheet = char.sheets[key];
@@ -879,9 +891,11 @@
           h('button', { class: 'ccfolia-btn', title: '이 캐릭터를 코코포리아에 붙여넣을 수 있게 복사해요',
             onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists },
               sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'),
-          h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '룰 틀 편집'),
-          h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제')),
-        sheetBody = renderSheet(template, sheet, { readonly: false, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets }));
+          editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '룰 틀 편집') : null,
+          editing ? h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제') : null),
+        sheetBody = renderSheet(template, fillDefaults(template, sheet),
+          { readonly: !editing, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets }));
+      sheetArea.classList.toggle('reading', !editing);
     }
     let sheetBody = null;
 
@@ -894,6 +908,8 @@
       drawTabs(); drawSheet();
     }
     function drawColorBar() {
+      colorBar.hidden = !editing;
+      if (!editing) { picker.hidden = true; return; }
       const slotBtn = ([k, label]) => h('button', { type: 'button', class: 'color-slot' + (pickingSlot === k ? ' open' : ''),
         onclick: () => { pickingSlot = pickingSlot === k ? null : k; drawColorBar(); } },
         dot(char.colors[k], label), h('span', {}, label), h('small', {}, COLOR[char.colors[k]] ? COLOR[char.colors[k]].name : '없음'));
@@ -927,13 +943,24 @@
       } else picker.hidden = true;
     }
 
-    const nameInput = h('input', { class: 'sheet-name', value: char.name || '', 'aria-label': '캐릭터 이름',
-      oninput: e => { char.name = e.target.value; markDirty(); } });
+    const head = h('div', { class: 'sheet-head' });
+    function drawHead() {
+      const modeSwitch = h('div', { class: 'mode-switch', role: 'group', 'aria-label': '보기 방식' },
+        h('button', { type: 'button', class: editing ? '' : 'on', 'aria-pressed': String(!editing), onclick: () => editing && setMode(false) }, '읽기'),
+        h('button', { type: 'button', class: editing ? 'on' : '', 'aria-pressed': String(editing), onclick: () => !editing && setMode(true) }, '편집'));
+      head.replaceChildren(
+        editing
+          ? h('input', { class: 'sheet-name', value: char.name || '', 'aria-label': '캐릭터 이름', oninput: e => { char.name = e.target.value; markDirty(); } })
+          : h('h1', { class: 'sheet-name' }, char.name || '(이름 없음)', colorDots(char.colors)),
+        h('div', { class: 'row' }, modeSwitch,
+          editing || state.dirty
+            ? h('button', { id: 'save-btn', class: 'primary', disabled: !state.dirty, onclick: e => save(e.target) }, state.dirty ? '저장' : '저장됨')
+            : null,
+          editing ? h('button', { class: 'danger ghost', onclick: e => removeCharacter(e.target) }, '캐릭터 삭제') : null));
+    }
+    drawHead();
     show(
-      h('div', { class: 'sheet-head' }, nameInput,
-        h('div', { class: 'row' },
-          h('button', { id: 'save-btn', class: 'primary', disabled: true, onclick: e => save(e.target) }, '저장됨'),
-          h('button', { class: 'danger ghost', onclick: e => removeCharacter(e.target) }, '캐릭터 삭제'))),
+      head,
       colorBar, picker,
       h('div', { class: 'char-layout' }, portraitSlot, h('div', { class: 'char-main' }, ruleTabs, sheetArea)));
     drawPortrait();
@@ -942,7 +969,7 @@
     selectSheet(currentKey);
 
     const keyHandler = e => {
-      if (!document.body.contains(nameInput)) return document.removeEventListener('keydown', keyHandler);
+      if (!document.body.contains(head)) return document.removeEventListener('keydown', keyHandler);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (state.dirty) save(document.getElementById('save-btn')); }
     };
     document.addEventListener('keydown', keyHandler);
@@ -1012,14 +1039,14 @@
           onchange: e => { set(e.target.checked); changed(); } });
       }
       if (type === 'textarea') {
-        return autoGrow(h('textarea', { value: value ?? '', readOnly: readonly,
+        return autoGrow(h('textarea', { value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
           oninput: e => { set(e.target.value); changed(); } }));
       }
       if (type === 'number') {
-        return h('input', { type: 'number', inputmode: 'decimal', value: value ?? '', readOnly: readonly,
+        return h('input', { type: 'number', inputmode: 'decimal', value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
           oninput: e => { set(e.target.value === '' ? '' : Number(e.target.value)); changed(); } });
       }
-      return h('input', { type: 'text', value: value ?? '', readOnly: readonly,
+      return h('input', { type: 'text', value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
         oninput: e => { set(e.target.value); changed(); } });
     }
 
