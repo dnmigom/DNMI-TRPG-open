@@ -240,9 +240,9 @@
     if (datasetKey) await loadDatasets(true);
     let ok = 0, fail = 0;
     for (const c of chars) for (const k of Object.keys(c.sheets || {})) {
-      const sh = c.sheets[k], t = templates[k];
+      const sh = c.sheets[k], t = templates[sheetTpl(k, sh)];
       if (!sh.share || !sh.share.gistId || !t) continue;
-      const hit = (templateKey && k === templateKey) ||
+      const hit = (templateKey && sheetTpl(k, sh) === templateKey) ||
         (datasetKey && (t.sections || []).some(s => E.sourceKeys(s).includes(datasetKey)));
       if (!hit) continue;
       try { await gh(`/gists/${sh.share.gistId}`, { method: 'PATCH', body: await gistBody(c, k, t) }); ok++; }
@@ -470,6 +470,11 @@
   // 이미지 값: "repo:images/…"(데이터 저장소에 올린 파일) 또는 "https://…"(바깥 주소)
   const IMAGE_KINDS = [['head', '두상'], ['bust', '흉상'], ['half', '반신'], ['full', '전신']];
   const charPath = id => `characters/${id}.json`;
+  // 캐릭터의 시트: 키 → 시트. 같은 룰로 여러 장이면 sheet.template에 템플릿 키 (예전 시트는 키 = 템플릿 키)
+  const sheetTpl = (k, sh) => (sh && sh.template) || k;
+  const tplKeysOf = c => [...new Set(Object.entries(c.sheets || {}).map(([k, sh]) => sheetTpl(k, sh)))];
+  const sheetsOfTpl = (c, t) => Object.keys(c.sheets || {}).filter(k => sheetTpl(k, c.sheets[k]) === t)
+    .sort((a, b) => String(c.sheets[a].created || '').localeCompare(String(c.sheets[b].created || '')));
 
   async function loadCharacters() {
     const files = (await listDir('characters')).filter(f => f.name.endsWith('.json'));
@@ -478,7 +483,7 @@
     return list.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')));
   }
   async function charactersUsing(key) {
-    return (await loadCharacters()).filter(c => c.sheets && c.sheets[key]);
+    return (await loadCharacters()).filter(c => tplKeysOf(c).includes(key));
   }
   const firstImageKind = images => (IMAGE_KINDS.find(([k]) => images && images[k]) || [])[0] || null;
 
@@ -556,7 +561,7 @@
       const SORTS = [['custom', '직접 배치'], ['name', '이름 가나다순'], ['rule', '룰 순서'], ['updated', '최근 수정순'], ['created', '만든 순']];
       if (!SORTS.some(x => x[0] === prefs.sort)) prefs.sort = 'custom';
       const tplRank = new Map(applyOrder(Object.keys(templates), order.templates).map((k, i) => [k, i]));
-      const ruleRank = c => Math.min(...Object.keys(c.sheets || {}).map(k => tplRank.has(k) ? tplRank.get(k) : 9999), 99999);
+      const ruleRank = c => Math.min(...tplKeysOf(c).map(k => tplRank.has(k) ? tplRank.get(k) : 9999), 99999);
       const customIds = () => applyOrder(chars.map(c => c.id), order.characters, true);
       function sorted(list) {
         const pos = new Map(customIds().map((k, i) => [k, i]));
@@ -585,11 +590,11 @@
       // 같은 묶음 안에서는 "하나라도", 묶음끼리는 "모두" 맞는 캐릭터
       const passes = (c, skip) =>
         (skip === 'q' || !f.q || String(c.name || '').toLowerCase().includes(f.q.toLowerCase())) &&
-        (skip === 'rules' || !f.rules.size || [...f.rules].some(k => c.sheets && c.sheets[k])) &&
+        (skip === 'rules' || !f.rules.size || [...f.rules].some(k => tplKeysOf(c).includes(k))) &&
         (skip === 'hair' || !f.hair.size || (c.colors && f.hair.has(c.colors.hair))) &&
         (skip === 'eye' || !f.eye.size || eyesOf(c).some(e => f.eye.has(e)));
       function drawFilters() {
-        const ruleKeys = Object.keys(templates).filter(k => chars.some(c => c.sheets && c.sheets[k]));
+        const ruleKeys = Object.keys(templates).filter(k => chars.some(c => tplKeysOf(c).includes(k)));
         const count = (group, test) => chars.filter(c => passes(c, group) && test(c)).length;
         const toggle = (set, v) => () => { if (set.has(v)) set.delete(v); else set.add(v); draw(); };
         const swatchRow = (group, set, test) => MUNSELL.map(([code, name, hex]) => {
@@ -604,7 +609,7 @@
           ruleKeys.length ? ['룰', ruleKeys.map(k => {
             const t = templates[k];
             const b = h('button', { type: 'button', class: 'filter-chip' + (f.rules.has(k) ? ' on' : ''), onclick: toggle(f.rules, k) },
-              t.rule || k, h('small', {}, count('rules', c => c.sheets && c.sheets[k])));
+              t.rule || k, h('small', {}, count('rules', c => tplKeysOf(c).includes(k))));
             b.style.setProperty('--accent', t.accent || '');
             return b;
           })] : null,
@@ -632,17 +637,18 @@
         const kind = firstImageKind(c.images);
         if (kind) imageSrc(c.images[kind]).then(src => { if (src) img.src = src; else thumb.classList.add('empty'); }).catch(() => thumb.classList.add('empty'));
         else thumb.classList.add('empty');
-        const keys = Object.keys(c.sheets || {});
+        const keys = tplKeysOf(c);
         return h('a', { class: 'char-card', 'data-key': c.id, href: `#/c/${encodeURIComponent(c.id)}` }, thumb,
           h('div', { class: 'char-info' },
             h('div', { class: 'char-title' }, h('strong', {}, c.name || '(이름 없음)'), colorDots(c.colors)),
             h('div', { class: 'rule-chips' }, keys.length ? keys.map(k => {
               const t = templates[k] || {};
-              const chip = h('span', { class: 'rule-chip' }, t.rule || k);
+              const n = sheetsOfTpl(c, k).length;
+              const chip = h('span', { class: 'rule-chip' }, t.rule || k, n > 1 ? ` · ${n}` : '');
               chip.style.setProperty('--accent', t.accent || '');
               return chip;
             }) : h('span', { class: 'muted small' }, '시트 없음')),
-            keys.some(k => c.sheets[k].share && c.sheets[k].share.gistId) ? h('span', { class: 'badge' }, '공유 중') : null));
+            Object.values(c.sheets || {}).some(sh => sh.share && sh.share.gistId) ? h('span', { class: 'badge' }, '공유 중') : null));
       }
       search.addEventListener('input', draw);
       draw();
@@ -875,8 +881,9 @@
         let shareFail = null;
         for (const k of sheetKeys()) {
           const s = char.sheets[k];
-          if (!s.share || !s.share.gistId || !templates[k]) continue;
-          try { await gh(`/gists/${s.share.gistId}`, { method: 'PATCH', body: await gistBody(char, k, templates[k]) }); }
+          const t = templates[sheetTpl(k, s)];
+          if (!s.share || !s.share.gistId || !t) continue;
+          try { await gh(`/gists/${s.share.gistId}`, { method: 'PATCH', body: await gistBody(char, k, t) }); }
           catch (e) { shareFail = e; }
         }
         setDirty(false);
@@ -922,27 +929,65 @@
       drawSheet();
     }
 
+    // 룰 버튼 "(룰 이름) · n개" → 누르면 아래에 그 룰로 쓴 시트들이 나열됨
+    let openRule = currentKey ? sheetTpl(currentKey, char.sheets[currentKey]) : null, listOpen = true;
+    const lastOfRule = {};
+    const titleOf = k => {
+      const sh = char.sheets[k];
+      if (sh && sh.title && String(sh.title).trim()) return sh.title;
+      const t = sheetTpl(k, sh), list = sheetsOfTpl(char, t);
+      return `${(templates[t] || {}).rule || t} ${list.indexOf(k) + 1}`;
+    };
+    function addSheet(t) {
+      const k = char.sheets[t] ? `${t}~${Date.now().toString(36)}` : t;
+      const sh = blankSheet(templates[t]);
+      sh.template = t;
+      char.sheets[k] = sh;
+      openRule = t; listOpen = true;
+      markDirty();
+      selectSheet(k);
+    }
     function drawTabs() {
-      const unused = Object.keys(templates).filter(k => !char.sheets[k] && !templates[k].error);
-      const picker = h('select', {}, unused.map(k => h('option', { value: k }, templates[k].rule || k)));
+      if (currentKey) { openRule = sheetTpl(currentKey, char.sheets[currentKey]); lastOfRule[openRule] = currentKey; }
+      const choices = Object.keys(templates).filter(k => !templates[k].error);
+      const picker = h('select', {}, choices.map(k => h('option', { value: k }, templates[k].rule || k)));
       const addBox = h('div', { class: 'add-sheet', hidden: true },
-        unused.length ? [picker, h('button', { type: 'button', class: 'primary', onclick: () => {
-          const k = picker.value;
-          char.sheets[k] = blankSheet(templates[k]);
-          markDirty();
-          selectSheet(k);
-        } }, '추가')] : h('span', { class: 'muted small' }, '추가할 수 있는 템플릿이 없어요.'),
+        choices.length ? [picker, h('button', { type: 'button', class: 'primary', onclick: () => addSheet(picker.value) }, '추가')]
+          : h('span', { class: 'muted small' }, '추가할 수 있는 템플릿이 없어요.'),
+        h('span', { class: 'muted small' }, '이미 있는 룰도 고를 수 있어요. 같은 룰로 시트를 여러 장 만들 수 있어요.'),
         h('a', { href: '#/template/new', class: 'small-link' }, '+ 새 시트 템플릿 만들기'));
-      ruleTabs.replaceChildren(
-        ...sheetKeys().map(k => {
-          const t = templates[k] || {};
-          const tab = h('button', { type: 'button', class: 'rule-tab' + (k === currentKey ? ' active' : ''), onclick: () => selectSheet(k) },
-            t.rule || `${k} (틀 없음)`,
-            char.sheets[k].share && char.sheets[k].share.gistId ? h('span', { class: 'dot', title: '공유 중' }) : null);
-          tab.style.setProperty('--accent', themeOf(char.colors, char.theme).accent || t.accent || '');
+      const accent = t => themeOf(char.colors, char.theme).accent || (templates[t] || {}).accent || '';
+      const rules = [...new Set(sheetKeys().map(k => sheetTpl(k, char.sheets[k])))];
+      const ruleRow = h('div', { class: 'rule-row' },
+        ...rules.map(t => {
+          const list = sheetsOfTpl(char, t);
+          const shared = list.some(k => char.sheets[k].share && char.sheets[k].share.gistId);
+          const active = t === openRule;
+          const tab = h('button', { type: 'button', class: 'rule-tab' + (active ? ' active' : ''), 'aria-expanded': String(active && listOpen),
+            onclick: () => {
+              if (active) { listOpen = !listOpen; drawTabs(); return; }
+              openRule = t; listOpen = true;
+              selectSheet(list.includes(lastOfRule[t]) ? lastOfRule[t] : list[0]);
+            } },
+            `${(templates[t] || {}).rule || `${t} (틀 없음)`} · ${list.length}개`,
+            shared ? h('span', { class: 'dot', title: '공유 중인 시트가 있어요' }) : null,
+            h('span', { class: 'caret' }, active && listOpen ? '▴' : '▾'));
+          tab.style.setProperty('--accent', accent(t));
           return tab;
         }),
-        ...(editing ? [h('button', { type: 'button', class: 'rule-tab add', onclick: () => { addBox.hidden = !addBox.hidden; } }, '+ 룰 시트 추가'), addBox] : []));
+        ...(editing ? [h('button', { type: 'button', class: 'rule-tab add', onclick: () => { addBox.hidden = !addBox.hidden; } }, '+ 룰 시트 추가')] : []));
+      let sheetRow = null;
+      if (openRule && listOpen) {
+        sheetRow = h('div', { class: 'sheet-row-tabs' },
+          sheetsOfTpl(char, openRule).map(k => {
+            const sh = char.sheets[k];
+            return h('button', { type: 'button', class: 'sheet-tab' + (k === currentKey ? ' active' : ''), onclick: () => selectSheet(k) },
+              titleOf(k), sh.share && sh.share.gistId ? h('span', { class: 'dot', title: '공유 중' }) : null);
+          }),
+          editing && templates[openRule] ? h('button', { type: 'button', class: 'sheet-tab add', onclick: () => addSheet(openRule) }, '+ 이 룰로 시트 하나 더') : null);
+        sheetRow.style.setProperty('--accent', accent(openRule));
+      }
+      ruleTabs.replaceChildren(ruleRow, ...(sheetRow ? [sheetRow] : []), ...(editing ? [addBox] : []));
     }
 
     function drawSheet() {
@@ -956,9 +1001,10 @@
         return;
       }
       const sheet = char.sheets[key];
-      const template = templates[key];
+      const tplKey = sheetTpl(key, sheet);
+      const template = templates[tplKey];
       if (!template) {
-        sheetArea.replaceChildren(h('div', { class: 'card notice' }, `이 시트의 템플릿(templates/${key}.json)을 찾을 수 없어요.`));
+        sheetArea.replaceChildren(h('div', { class: 'card notice' }, `이 시트의 템플릿(templates/${tplKey}.json)을 찾을 수 없어요.`));
         return;
       }
       const shareBox = h('span', { class: 'share-tools row tight' });
@@ -997,7 +1043,7 @@
         }
       }
       async function removeSheet(b) {
-        if (!confirm(`"${template.rule || key}" 시트를 이 캐릭터에서 삭제할까요? 저장하면 되돌릴 수 없어요.`)) return;
+        if (!confirm(`"${titleOf(key)}" 시트를 이 캐릭터에서 삭제할까요? 저장하면 되돌릴 수 없어요.`)) return;
         busy(b, true);
         try {
           if (sheet.share && sheet.share.gistId) {
@@ -1005,7 +1051,7 @@
           }
           delete char.sheets[key];
           await save();
-          selectSheet(sheetKeys()[0] || null);
+          selectSheet(sheetsOfTpl(char, tplKey)[0] || sheetKeys()[0] || null);
         } catch (e) { toast(e.message, true); busy(b, false); }
       }
       drawShare();
@@ -1013,10 +1059,17 @@
         h('button', { class: 'ccfolia-btn', title: '이 캐릭터를 코코포리아에 붙여넣을 수 있게 복사해요',
           onclick: () => copyCcfolia(template, { name: char.name, values: sheet.values, lists: sheet.lists, grids: sheet.grids },
             sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'));
+      // 시트 이름 (같은 룰 시트가 여러 장일 때 구분용)
+      const titleInput = h('input', { class: 'sheet-title-input', value: sheet.title || '', placeholder: titleOf(key), 'aria-label': '시트 이름',
+        oninput: e => {
+          if (e.target.value.trim()) sheet.title = e.target.value; else delete sheet.title;
+          markDirty(); drawTabs();
+        } });
       sheetArea.replaceChildren(...[
         !editing ? null : h('div', { class: 'sheet-actions row' },
-          editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '템플릿 편집') : null,
-          editing ? h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제') : null),
+          h('label', { class: 'mini-field sheet-title-field' }, h('span', {}, '시트 이름'), titleInput),
+          h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(tplKey)}` }, '템플릿 편집'),
+          h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 시트 삭제')),
         sheetBody = renderSheet(template, fillDefaults(template, sheet),
           { readonly: !editing, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets })].filter(Boolean));
       sheetArea.classList.toggle('reading', !editing);
@@ -1080,6 +1133,10 @@
           editing || state.dirty
             ? h('button', { id: 'save-btn', class: 'primary', disabled: !state.dirty, onclick: e => save(e.target) }, state.dirty ? '저장' : '저장됨')
             : null,
+          editing ? h('button', { class: 'save-list-btn', onclick: async e => {
+            if (state.dirty) { await save(e.target); if (state.dirty) return; }
+            go('/');
+          } }, '저장하고 목록으로') : null,
           editing ? h('button', { class: 'danger ghost', onclick: e => removeCharacter(e.target) }, '캐릭터 삭제') : null));
     }
     drawHead();
@@ -1094,7 +1151,7 @@
 
     // 다른 탭에서 룰 틀·데이터를 고치고 돌아오면 새 룰 틀로 다시 그림 (입력해 둔 값은 그대로)
     let checking = false, lastCheck = Date.now();
-    const sig = () => JSON.stringify(Object.keys(char.sheets).map(k => [templates[k], datasets]));
+    const sig = () => JSON.stringify(Object.keys(char.sheets).map(k => [templates[sheetTpl(k, char.sheets[k])], datasets]));
     async function recheck() {
       if (!document.body.contains(head)) {
         document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible);

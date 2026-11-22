@@ -783,3 +783,19 @@ main .sheet.canvas > .card { grid-column: var(--gc); grid-row: var(--gr); min-wi
 .import-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; }
 .import-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
 .import-item strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ================= 같은 룰의 시트 여러 장 ================= */
+.rule-tabs { display: grid; gap: 8px; justify-items: start; }
+.rule-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rule-tab .caret { font-size: 0.6875rem; opacity: .8; }
+.sheet-row-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px;
+  border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.sheet-tab { border-radius: 8px; padding: 5px 12px; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 6px; background: var(--card); }
+.sheet-tab.active { border-color: var(--accent); color: var(--accent); font-weight: 700; box-shadow: inset 0 0 0 1px var(--accent); }
+.sheet-tab.add { border-style: dashed; background: transparent; color: var(--muted); }
+.sheet-tab .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .7; }
+.sheet-actions { align-items: flex-end; }
+.sheet-title-field { flex: 0 1 260px; }
+.sheet-title-field input { width: 100%; }

@@ -103,7 +103,9 @@
     try {
       [templates, datasets] = await Promise.all([A.loadTemplates(true), A.loadDatasets(true)]);
       if (param !== 'new' && !param.startsWith('new?')) {
-        users = (await A.charactersUsing(param)).map(c => ({ name: c.name, sheet: c.sheets[param] || {} }));
+        users = (await A.charactersUsing(param)).flatMap(c => Object.entries(c.sheets || {})
+          .filter(([k, sh]) => ((sh && sh.template) || k) === param)
+          .map(([k, sh]) => ({ name: sh.title ? `${c.name}(${sh.title})` : c.name, sheet: sh || {} })));
       }
     } catch (e) { return A.failed(e); }
 
