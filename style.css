@@ -777,3 +777,9 @@ main .sheet.canvas > .card { grid-column: var(--gc); grid-row: var(--gr); min-wi
 .cv-arrange .sheet > .card summary { pointer-events: auto; }
 .cv-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
 .cv-toolbar #save-btn, .cv-toolbar .save-list-btn { font-size: 0.875rem; padding: 6px 14px; }
+
+/* 카드 가져오기 */
+.import-list { display: grid; gap: 6px; max-height: 55vh; overflow: auto; }
+.import-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; }
+.import-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.import-item strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1138,6 +1138,122 @@
         fileLabel);
     }
 
+    // ---------- 다른 템플릿(또는 이 템플릿)의 카드를 복사해 오기 ----------
+    const importState = { src: null, chosen: new Set() };
+    function sourceOf(k) {
+      if (k === '__self') return draft;
+      const t = templates[k];
+      return t && !t.error ? CV.toCanvas(clone(t)) : null;
+    }
+    const kindName = x => (x.type === 'list' ? '표' : x.type === 'grid' ? '특기표' : '칸 묶음');
+    function importPanel() {
+      const keys = Object.keys(templates).filter(k => k !== key && !templates[k].error);
+      if (!importState.src || (importState.src !== '__self' && !keys.includes(importState.src))) importState.src = keys[0] || '__self';
+      const src = sourceOf(importState.src);
+      const pick = h('select', { onchange: e => { importState.src = e.target.value; importState.chosen = new Set(); drawEditor(); } },
+        keys.map(k => h('option', { value: k, selected: k === importState.src }, templates[k].rule || k)),
+        h('option', { value: '__self', selected: importState.src === '__self' }, '이 템플릿 (카드 복제)'));
+      const secs = (src && src.sections) || [];
+      const items = secs.map((x, i) => {
+        const n = x.type === 'list' ? (x.columns || []).length : x.type === 'grid' ? (x.rows || []).length : (x.fields || []).length;
+        const unit = x.type === 'list' ? '열' : x.type === 'grid' ? '줄' : '칸';
+        return h('label', { class: 'import-item' + (importState.chosen.has(i) ? ' on' : '') },
+          h('input', { type: 'checkbox', checked: importState.chosen.has(i), onchange: e => {
+            if (e.target.checked) importState.chosen.add(i); else importState.chosen.delete(i);
+            e.target.closest('.import-item').classList.toggle('on', e.target.checked);
+            go.disabled = !importState.chosen.size; go.textContent = `선택한 카드 ${importState.chosen.size}개 가져오기`;
+          } }),
+          h('span', { class: 'section-kind' }, kindName(x)),
+          h('strong', {}, x.title || '(이름 없음)'),
+          h('span', { class: 'muted small' }, `${n}${unit}${x.folded ? ' · 숨긴 묶음' : ''}`));
+      });
+      const go = h('button', { type: 'button', class: 'primary', disabled: !importState.chosen.size,
+        onclick: () => importCards(src, [...importState.chosen].sort((a, b) => a - b)) }, `선택한 카드 ${importState.chosen.size}개 가져오기`);
+      return h('section', { class: 'card tpl-section import-panel' },
+        h('p', { class: 'muted small' }, '고른 카드를 칸·수식까지 통째로 복사해서 이 템플릿 맨 아래에 붙여요. 원래 템플릿은 바뀌지 않아요. 이름이 겹치는 칸은 이름 뒤에 숫자를 붙이고, 가져온 수식도 그 이름으로 맞춰요.'),
+        h('label', { class: 'mini-field' }, h('span', {}, '가져올 템플릿'), pick),
+        secs.length ? h('div', { class: 'import-list' }, items) : h('p', { class: 'muted' }, '카드가 없어요.'),
+        h('div', { class: 'row tight' },
+          secs.length ? h('button', { type: 'button', class: 'small-btn', onclick: () => {
+            importState.chosen = importState.chosen.size === secs.length ? new Set() : new Set(secs.map((_, i) => i)); drawEditor();
+          } }, importState.chosen.size === secs.length ? '모두 풀기' : '모두 고르기') : null,
+          go));
+    }
+    function importCards(src, idxs) {
+      if (!src || !idxs.length) return;
+      const secs = idxs.map(i => clone(src.sections[i]));
+      if (src === draft) for (const x of secs) x.title = (x.title || '') + ' 사본';
+      // 이 템플릿에서 이미 쓰는 이름(칸·붙은 숫자·표·특기표)과 겹치면 새 이름으로
+      const taken = new Set([...allFields().map(x => x.id), ...allLists().map(x => x.id), ...allGrids().map(x => x.id)]);
+      const fmap = new Map(), tmap = new Map();
+      const fresh1 = (id, map) => {
+        if (!taken.has(id)) { taken.add(id); return id; }
+        const n = idFrom(id, taken); taken.add(n); map.set(id, n); return n;
+      };
+      for (const x of secs) {
+        if (x.type === 'list' || x.type === 'grid') x.id = fresh1(x.id, tmap);
+        else for (const f of x.fields || []) { f.id = fresh1(f.id, fmap); for (const p of f.parts || []) p.id = fresh1(p.id, fmap); }
+      }
+      // 가져온 수식 안의 이름도 새 이름으로 (두 단계로 바꿔서 a→b, b→c가 엉키지 않게)
+      const all = [...fmap, ...tmap];
+      const remap = (str, localCols) => {
+        if (typeof str !== 'string' || !all.length) return str;
+        let out = str;
+        all.forEach(([o], i) => {
+          if (localCols && localCols.has(o) && fmap.has(o)) return; // 표 안에서는 같은 이름의 열이 먼저
+          out = replaceIdent(out, o, `__가져옴${i}__`);
+          if (tmap.has(o)) out = out.split(`"${o}"`).join(`"__가져옴${i}__"`).split(`'${o}'`).join(`'__가져옴${i}__'`);
+        });
+        all.forEach(([, n], i) => { out = out.split(`__가져옴${i}__`).join(n); });
+        return out;
+      };
+      for (const x of secs) {
+        if (x.type === 'list') {
+          const cols = new Set((x.columns || []).map(c => c.id));
+          for (const c of x.columns || []) if (c.formula !== undefined) c.formula = remap(c.formula, cols);
+        } else if (x.type !== 'grid') {
+          for (const f of x.fields || []) for (const y of [f, ...(f.parts || [])]) {
+            if (y.formula !== undefined) y.formula = remap(y.formula);
+            if (typeof y.max === 'string') y.max = remap(y.max);
+          }
+        }
+      }
+      // 자리: 지금 카드들 아래에, 가져온 카드끼리의 배치는 그대로
+      const bottom = Math.max(0, ...draft.sections.map(x => { const q = CV.posOf(x, CV.COLS); return q.y + q.h; }));
+      const top = Math.min(...secs.map(x => CV.posOf(x, CV.COLS).y));
+      for (const x of secs) {
+        const q = CV.posOf(x, CV.COLS);
+        x.pos = { ...q, y: q.y - top + bottom };
+        fresh.add(x);
+        for (const y of [...(x.fields || []), ...(x.columns || [])]) { fresh.add(y); for (const p of y.parts || []) fresh.add(p); }
+        draft.sections.push(x);
+      }
+      importState.chosen = new Set();
+      changed(); refreshPreview(true);
+      // 가져온 수식이 이 템플릿에 없는 칸을 쓰는지 확인
+      const broken = [];
+      try {
+        seedPreview();
+        const r = E.makeResolver(draft, preview);
+        for (const x of secs) if (isFieldSec(x)) for (const f of x.fields) for (const y of [f, ...(f.parts || [])]) {
+          if (y.formula === undefined && typeof y.max !== 'string') continue;
+          try { if (y.formula !== undefined) r.get(y.id); if (typeof y.max === 'string') r.evaluate(y.max); }
+          catch (e) { broken.push(labelOf(y)); }
+        }
+        for (const x of secs) if (x.type === 'list' && (preview.lists[x.id] || []).length) for (const c of x.columns || []) {
+          if (c.formula === undefined) continue;
+          try { r.cell(x.id, 0, c.id); } catch (e) { broken.push(`${x.title || x.id}의 ${c.label || c.id} 열`); }
+        }
+      } catch {}
+      const renamed = fmap.size + tmap.size;
+      A.toast(`카드 ${secs.length}개를 가져왔어요.` + (renamed ? ` 이름이 겹친 ${renamed}개는 새 이름을 붙였어요.` : '')
+        + (broken.length ? ` ⚠ 수식에서 이 템플릿에 없는 칸을 쓰는 칸: ${broken.slice(0, 4).join(', ')}${broken.length > 4 ? ' 외' : ''} — 눌러서 수식을 고쳐 주세요.` : ''), !!broken.length);
+      sel = { kind: 'sec', s: secs[0] };
+      drawEditor();
+      const el = previewBody.querySelector(`.sheet > .card[data-sec="${draft.sections.indexOf(secs[0])}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     function drawEditor() {
       if (activeInput) { activeInput = null; helper.remove(); previewBody.classList.remove('picking'); }
       // 지워진 것을 가리키고 있으면 정리
@@ -1151,7 +1267,10 @@
       fitToolbar();
       markSelected();
       if (!sel) { editorCol.replaceChildren(); return; }
-      if (sel.kind === 'meta') {
+      if (sel.kind === 'import') {
+        drawerTitle.textContent = '다른 템플릿에서 카드 가져오기';
+        editorCol.replaceChildren(importPanel());
+      } else if (sel.kind === 'meta') {
         drawerTitle.textContent = '템플릿 설정';
         editorCol.replaceChildren(metaCard(), ccfoliaCard());
         updateFileLabel(); updateCcPreview();
@@ -1499,6 +1618,7 @@
       h('button', { type: 'button', onclick: () => addSection('fields') }, '+ 칸 묶음'),
       h('button', { type: 'button', onclick: () => addSection('list'), title: '기능·소지품처럼 줄이 늘어나는 표' }, '+ 표'),
       h('button', { type: 'button', onclick: () => addSection('grid'), title: '격자 모양 특기표' }, '+ 특기표'),
+      h('button', { type: 'button', onclick: () => select({ kind: 'import' }), title: '다른 템플릿의 카드를 통째로 복사해 와요' }, '⤵ 카드 가져오기'),
       h('button', { type: 'button', onclick: () => select({ kind: 'meta' }) }, '⚙ 템플릿 설정 · 코코포리아'),
       h('span', { class: 'muted small cv-tip' }, '카드·칸을 끌어서 옮기고 ◢ 모서리로 크기를 바꿔요. 휴대폰은 꾹 눌러서 옮겨요.'));
     const stage = h('div', { class: 'cv-stage' }, previewBody);
@@ -1515,7 +1635,7 @@
     root.style.setProperty('--accent', draft.accent || '');
     stage.addEventListener('pointerdown', e => {
       if (activeInput || mode !== 'arrange' || e.target.closest('.card')) return;
-      if (sel && sel.kind !== 'meta') select(null); // 빈 곳을 누르면 설정 창 닫기
+      if (sel && sel.kind !== 'meta' && sel.kind !== 'import') select(null); // 빈 곳을 누르면 설정 창 닫기
     });
 
     // 엑셀처럼: 수식 입력 중에 미리보기의 칸을 클릭하면 그 칸 이름이 들어감
