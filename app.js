@@ -1160,6 +1160,84 @@
   }
 
 
+  // ---------------- 자유 배치(격자) ----------------
+  // template.canvas = { cols: 12 } 이면 칸 묶음(카드)마다 pos {x, y, w, h}, 칸 묶음 안의 칸마다 pos, 칸 묶음의 가로 칸 수 s.cols
+  const CANVAS_COLS = 12;
+  const isCanvas = t => !!(t && t.canvas);
+  const posOf = (o, cols) => {
+    const p = o.pos || {};
+    const w = Math.max(1, Math.min(cols, Math.floor(p.w) || 1));
+    return { x: Math.max(0, Math.min(cols - w, Math.floor(p.x) || 0)), y: Math.max(0, Math.floor(p.y) || 0), w, h: Math.max(1, Math.floor(p.h) || 1) };
+  };
+  const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  // 겹치지 않게 위로 붙여서 정리. fixed(옮기는 중인 것)는 그 자리에 두고 나머지가 비켜 감
+  function settle(items, cols, fixed) {
+    const placed = fixed ? [fixed] : [];
+    const rest = items.filter(it => it !== fixed).sort((a, b) => a.y - b.y || a.x - b.x);
+    for (const it of rest) {
+      it.w = Math.max(1, Math.min(cols, it.w)); it.x = Math.max(0, Math.min(cols - it.w, it.x));
+      let y = 0;
+      while (placed.some(p => overlaps(p, { ...it, y }))) y++;
+      it.y = y; placed.push(it);
+    }
+    return items;
+  }
+  // 빈 자리 중 가장 위·왼쪽
+  function freeSpot(items, cols, w, h) {
+    w = Math.min(w, cols);
+    for (let y = 0; ; y++) for (let x = 0; x + w <= cols; x++) {
+      const cand = { x, y, w, h };
+      if (!items.some(p => overlaps(p, cand))) return cand;
+    }
+  }
+  // 예전 방식(한 줄에 n개 · 한 줄에 칸 n개) 템플릿을 격자 배치로 바꿈 (모양은 최대한 비슷하게)
+  function toCanvas(t) {
+    if (isCanvas(t)) return t;
+    const cols = CANVAS_COLS;
+    t.canvas = { cols };
+    const spec = (t.cardRows || []).map(n => Math.floor(Number(n))).filter(n => n >= 1);
+    const rest = Math.floor(Number(t.cardsPerRow)) || 2;
+    let y = 0, row = [], rowIdx = 0;
+    const flush = () => {
+      if (!row.length) return;
+      const n = row.length, w = Math.floor(cols / n);
+      row.forEach((s, i) => { s.pos = { x: i * w, y, w: i === n - 1 ? cols - i * w : w, h: 1 }; });
+      y++; row = []; rowIdx++;
+    };
+    const want = () => spec[rowIdx] || rest;
+    for (const s of t.sections || []) {
+      if (s.type === 'grid' || (s.wide && !spec.length)) { flush(); s.pos = { x: 0, y, w: cols, h: 1 }; y++; rowIdx++; continue; }
+      row.push(s);
+      if (row.length >= Math.min(want(), 6)) flush();
+    }
+    flush();
+    for (const s of t.sections || []) {
+      if (s.type === 'list' || s.type === 'grid') continue;
+      const perRow = Math.floor(Number(s.perRow));
+      const cw = s.pos.w;
+      s.cols = s.layout === 'stack' ? 1 : perRow >= 2 ? Math.min(perRow, 12) : cw >= 12 ? 6 : cw >= 6 ? 3 : 2;
+      let x = 0, fy = 0;
+      for (const f of s.fields || []) {
+        const w = f.wide ? s.cols : (f.parts || []).length ? Math.min(2, s.cols) : 1;
+        if (x + w > s.cols) { x = 0; fy++; }
+        f.pos = { x, y: fy, w, h: 1 };
+        x += w;
+        if (f.wide) { x = 0; fy++; }
+      }
+      delete s.perRow; delete s.layout;
+      for (const f of s.fields || []) delete f.wide;
+    }
+    for (const s of t.sections || []) delete s.wide;
+    delete t.cardRows; delete t.cardsPerRow;
+    return t;
+  }
+  function placeStyle(el, p, cols) {
+    el.style.setProperty('--gc', `${p.x + 1} / span ${p.w}`);
+    el.style.setProperty('--gr', `${p.y + 1} / span ${p.h}`);
+    el.style.setProperty('--gcm', `auto / span ${Math.min(p.w, Math.min(cols, 2))}`);
+    el.style.setProperty('--o', String(p.y * 100 + p.x));
+  }
+
   // ---------------- 시트 그리기 (모든 룰 공통) ----------------
   const openFolds = new WeakSet(); // 펼쳐 둔 "숨긴 칸"은 다시 그려도 펼친 채로
   const openSections = new WeakSet(); // 펼쳐 둔 "숨긴 묶음"도 마찬가지
@@ -1394,18 +1472,21 @@
     const root = h('div', { class: 'sheet' });
     if (accent || template.accent) root.style.setProperty('--accent', accent || template.accent);
     // 한 줄에 놓을 칸 묶음 수 (룰 틀마다). 화면이 좁으면 2개, 휴대폰은 1개까지 줄어듦
-    const cardsPerRow = Math.floor(Number(template.cardsPerRow));
-    const cardRows = (template.cardRows || []).map(n => Math.floor(Number(n))).filter(n => n >= 1);
+    const canvas = isCanvas(template);
+    const cardsPerRow = canvas ? 0 : Math.floor(Number(template.cardsPerRow));
+    const cardRows = canvas ? [] : (template.cardRows || []).map(n => Math.floor(Number(n))).filter(n => n >= 1);
+    if (canvas) { root.classList.add('canvas'); root.style.setProperty('--cols', CANVAS_COLS); }
     if (cardsPerRow >= 1 && !cardRows.length) {
       root.classList.add('fixed-cards');
       root.style.setProperty('--cards', cardsPerRow);
       root.style.setProperty('--cards-md', Math.min(cardsPerRow, 2));
     }
 
-    const cardBySection = (template.sections || []).map(s => {
+    const cardBySection = (template.sections || []).map((s, si) => {
       // 숨긴 묶음: 읽기·공유 화면에서는 아예 빼고, 편집할 때는 접힌 카드로 (눌러서 펼침)
       if (s.folded && readonly) return null;
-      const card = h('section', { class: 'card' + (s.wide || s.type === 'grid' ? ' wide' : '') + (s.folded ? ' folded-card' : '') + (s.type === 'grid' ? ' grid-card' : '') });
+      const card = h('section', { class: 'card' + (!canvas && (s.wide || s.type === 'grid') ? ' wide' : '') + (s.folded ? ' folded-card' : '') + (s.type === 'grid' ? ' grid-card' : ''), 'data-sec': si });
+      if (canvas) placeStyle(card, posOf(s, CANVAS_COLS), CANVAS_COLS);
       let target = card;
       if (s.folded) {
         target = h('details', { class: 'folded-section', open: openSections.has(s),
@@ -1430,7 +1511,17 @@
         return el;
       };
       const shown = (s.fields || []).filter(f => !f.folded), folded = (s.fields || []).filter(f => f.folded);
-      if (shown.length) card.append(box(shown.map(renderField)));
+      if (canvas) {
+        // 격자 배치: 칸마다 정한 자리에 (빈 묶음도 편집할 때는 칸을 끌어다 놓을 수 있게 빈 격자를 둠)
+        const cols = Math.max(1, Math.min(12, Math.floor(s.cols) || 4));
+        if (shown.length || !readonly) {
+          const grid = h('div', { class: 'fields canvas' + (shown.length ? '' : ' empty') });
+          grid.style.setProperty('--cols', cols);
+          grid.style.setProperty('--cols-m', Math.min(cols, 2));
+          for (const f of shown) { const el = renderField(f); placeStyle(el, posOf(f, cols), cols); grid.append(el); }
+          card.append(grid);
+        }
+      } else if (shown.length) card.append(box(shown.map(renderField)));
       // 접힌 칸: 편집할 때만 "숨긴 칸 보기"로 펼쳐서 입력, 읽기·공유 화면에서는 안 보임
       if (folded.length && !readonly) {
         const det = h('details', { class: 'folded-fields', open: openFolds.has(s),
@@ -1725,6 +1816,7 @@
 
   // 다른 파일(editor.js)이 쓸 수 있도록 내부 도구를 내보냄
   window.SheetApp = {
+    canvas: { COLS: CANVAS_COLS, isCanvas, posOf, overlaps, settle, freeSpot, toCanvas, placeStyle },
     h, toast, show, loading, failed, go, setDirty, state, routes,
     readJson, writeJson, deleteFile, listDir, loadTemplates,
     resetTemplates: () => { templateCache = null; },
