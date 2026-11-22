@@ -385,9 +385,11 @@
   // ---------------- 캐릭터 색 (먼셀 10색 + 흰색·회색·검은색) ----------------
   const MUNSELL = [
     ['R', '빨강', '#E03A3E'], ['YR', '주황', '#F28A1E'], ['Y', '노랑', '#F5CB1D'], ['GY', '연두', '#96C43B'],
-    ['G', '초록', '#2E9E57'], ['BG', '청록', '#1C9E9B'], ['B', '파랑', '#2E86D1'], ['PB', '남색', '#3B4AAE'],
-    ['P', '보라', '#8A4FB8'], ['RP', '자주', '#C33F80'],
+    ['G', '초록', '#2E9E57'], ['BG', '청록', '#1C9E9B'], ['SK', '하늘', '#6EC1EA'], ['B', '파랑', '#2E86D1'], ['PB', '남색', '#3B4AAE'],
+    ['P', '보라', '#8A4FB8'], ['RP', '자주', '#C33F80'], ['PK', '분홍', '#F29BBF'], ['BR', '갈색', '#8A5A3B'],
     ['WH', '흰색', '#F4F3EE'], ['GR', '회색', '#9A9AA0'], ['BK', '검은색', '#222226'],
+    // 투톤 이상: 점은 무지개색으로 표시
+    ['MX', '투톤 이상', 'conic-gradient(#E03A3E, #F28A1E, #F5CB1D, #2E9E57, #2E86D1, #8A4FB8, #E03A3E)'],
   ];
   const COLOR = Object.fromEntries(MUNSELL.map(([code, name, hex]) => [code, { code, name, hex }]));
   const COLOR_SLOTS = [['hair', '머리'], ['eye1', '눈 1'], ['eye2', '눈 2']];
@@ -398,6 +400,9 @@
   }
   // 흰색·회색·검은색은 색상(hue)이 없어서 강조색·배경색을 따로 정함
   const NEUTRAL = {
+    // 투톤 이상: 한 가지 색이 없어서 강조색은 보라 계열, 배경은 옅은 라벤더
+    MX: { light: { accent: 'hsl(265 45% 48%)', on: '#fff', bg: 'hsl(265 40% 95%)', field: 'hsl(265 30% 98%)', line: 'hsl(265 20% 87%)' },
+          dark: { accent: 'hsl(265 60% 74%)', on: '#111', bg: 'hsl(265 18% 12%)', field: 'hsl(265 15% 15%)', line: 'hsl(265 12% 25%)' } },
     WH: { light: { accent: 'hsl(40 4% 46%)', on: '#fff', bg: 'hsl(45 30% 98%)', field: '#ffffff', line: 'hsl(45 12% 88%)' },
           dark: { accent: 'hsl(40 6% 88%)', on: '#111', bg: 'hsl(40 3% 18%)', field: 'hsl(40 3% 21%)', line: 'hsl(40 3% 31%)' } },
     GR: { light: { accent: 'hsl(240 3% 40%)', on: '#fff', bg: 'hsl(240 3% 92%)', field: 'hsl(240 3% 97%)', line: 'hsl(240 3% 84%)' },
