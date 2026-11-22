@@ -432,7 +432,13 @@
       params: (cfg.params || []).map(p => ({ label: p.label || '', value: text(p.value, p.label) })),
       commands,
     };
-    if (cfg.color) data.color = cfg.color;
+    // 채팅 글자색: "#ff8800"처럼 직접 적거나 {색상코드}처럼 칸에서 불러옴
+    if (cfg.color && String(cfg.color).trim()) {
+      let color = text(String(cfg.color), '글자색').trim();
+      if (/^[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color)) color = '#' + color;
+      if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) data.color = color;
+      else if (color) warnings.push(`글자색: "${color}"은 색상 코드가 아니라서 보내지 않았어요. #ff8800처럼 적어 주세요.`);
+    }
     if (opts.externalUrl) data.externalUrl = opts.externalUrl;
     return { clipboard: { kind: 'character', data }, warnings };
   }

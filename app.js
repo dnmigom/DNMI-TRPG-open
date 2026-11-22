@@ -1131,9 +1131,11 @@
         h('button', { type: 'button', class: editing ? '' : 'on', 'aria-pressed': String(!editing), onclick: () => editing && setMode(false) }, '읽기'),
         h('button', { type: 'button', class: editing ? 'on' : '', 'aria-pressed': String(editing), onclick: () => !editing && setMode(true) }, '편집'));
       head.replaceChildren(
-        editing
-          ? h('input', { class: 'sheet-name', value: char.name || '', 'aria-label': '캐릭터 이름', oninput: e => { char.name = e.target.value; markDirty(); } })
-          : h('h1', { class: 'sheet-name' }, char.name || '(이름 없음)', colorDots(char.colors)),
+        h('div', { class: 'title-row' },
+          h('a', { class: 'back-link', href: '#/', title: '캐릭터 목록으로' }, '← 캐릭터 목록'),
+          editing
+            ? h('input', { class: 'sheet-name', value: char.name || '', 'aria-label': '캐릭터 이름', oninput: e => { char.name = e.target.value; markDirty(); } })
+            : h('h1', { class: 'sheet-name' }, char.name || '(이름 없음)', colorDots(char.colors))),
         h('div', { class: 'row' }, sheetTools, modeSwitch,
           editing || state.dirty
             ? h('button', { id: 'save-btn', class: 'primary', disabled: !state.dirty, onclick: e => save(e.target) }, state.dirty ? '저장' : '저장됨')
@@ -1303,6 +1305,7 @@
   // ---------------- 시트 그리기 (모든 룰 공통) ----------------
   const openFolds = new WeakSet(); // 펼쳐 둔 "숨긴 칸"은 다시 그려도 펼친 채로
   const openSections = new WeakSet(); // 펼쳐 둔 "숨긴 묶음"도 마찬가지
+  const openToggles = new WeakSet(); // 펼쳐 둔 "접어 둔 카드"
   function renderSheet(template, sheet, { readonly, onChange, accent, datasets, exactLayout }) {
     sheet.values = sheet.values || {};
     sheet.lists = sheet.lists || {};
@@ -1337,8 +1340,10 @@
         return h('input', { type: 'number', inputmode: 'decimal', value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
           oninput: e => { set(e.target.value === '' ? '' : Number(e.target.value)); changed(); } });
       }
-      return h('input', { type: 'text', value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
-        oninput: e => { set(e.target.value); changed(); } });
+      // 글자 칸: 한 줄짜리지만 폭이 모자라면 줄을 바꿔서 다 보이게 (Enter로는 줄을 넣지 않음)
+      return autoGrow(h('textarea', { class: 'line-text', value: value ?? '', readOnly: readonly, placeholder: readonly ? '—' : null,
+        onkeydown: e => { if (e.key === 'Enter' && !e.isComposing) e.preventDefault(); },
+        oninput: e => { const v = e.target.value.replace(/\n/g, ' '); if (v !== e.target.value) e.target.value = v; set(v); changed(); } }));
     }
 
     function renderField(f) {
@@ -1346,6 +1351,7 @@
       const val = sheet.values[f.id];
       let control;
       if (f.formula) control = computedCell(r => r.get(f.id));
+      else if (f.type === 'select' && readonly) control = h('div', { class: 'read-text' }, val ? String(val) : '—');
       else if (f.type === 'select') {
         control = h('select', { disabled: readonly, onchange: e => { set(e.target.value); changed(); } },
           h('option', { value: '' }, '—'),
@@ -1561,6 +1567,13 @@
           ontoggle: e => { if (e.target.open) openSections.add(s); else openSections.delete(s); } },
           h('summary', {}, h('h2', {}, s.title || ''), h('span', { class: 'muted small' }, '숨긴 묶음')));
         card.append(target);
+      } else if (s.toggle) {
+        // 접어 둔 카드: 읽기·공유 화면에서도 제목을 눌러 펼쳐 볼 수 있음 (템플릿 편집기에서는 펼친 채로)
+        target = h('details', { class: 'toggle-section', open: exactLayout || openToggles.has(s),
+          ontoggle: e => { if (exactLayout) return; if (e.target.open) openToggles.add(s); else openToggles.delete(s); } },
+          h('summary', {}, h('h2', {}, s.title || ''), h('span', { class: 'toggle-hint muted small' }, '펼치기')));
+        card.classList.add('toggle-card');
+        card.append(target);
       } else card.append(h('h2', {}, s.title || ''));
       if (s.type === 'grid') gridSections.push([target, s]);
       else if (s.type === 'list') listSections.push([target, s]);
@@ -1633,7 +1646,7 @@
       if (canvas && !exactLayout) {
         // 시트 화면: 숨긴 카드·빈 카드가 빠진 자리(편집 중에는 접힌 카드의 남는 높이)를 남은 카드가 위로 올라와 채움
         const shownCards = cardBySection.map((card, i) => [card, (template.sections || [])[i]]).filter(([card]) => card && !card.hidden);
-        const items = shownCards.map(([card, s]) => { const q = posOf(s, CANVAS_COLS); return { card, ...q, h: s.folded ? 1 : q.h }; });
+        const items = shownCards.map(([card, s]) => { const q = posOf(s, CANVAS_COLS); return { card, ...q, h: s.folded || s.toggle ? 1 : q.h }; });
         settle(items, CANVAS_COLS);
         for (const it of items) placeStyle(it.card, it, CANVAS_COLS);
       }

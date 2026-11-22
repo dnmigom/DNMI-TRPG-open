@@ -181,6 +181,7 @@
         for (const p of cc.params || []) p.value = inText(p.value, null);
         cc.commands = inText(cc.commands, null);
         cc.memo = inText(cc.memo, null);
+        if (cc.color) cc.color = inText(cc.color, null);
         for (const lc of cc.listCommands || []) lc.line = inText(lc.line, allLists().find(l => l.id === lc.list) || null);
       }
     }
@@ -281,6 +282,12 @@
 
     // ---------- 작은 부품 ----------
     const iconBtn = (text, title, fn, cls) => h('button', { type: 'button', class: 'icon-btn ' + (cls || ''), title, onclick: fn }, text);
+    // 접어 두기: 숨기기와 달리 읽기·공유 화면에서도 제목은 보이고, 눌러서 펼쳐 볼 수 있음
+    const toggleBtn = x => iconBtn(x.toggle ? '▸' : '▾', x.toggle
+      ? '접어 둔 카드예요 — 시트에서 제목만 보이고 눌러서 펼쳐요. 눌러서 늘 펼쳐 두기'
+      : '접어 두기 (시트에서 제목만 보이고, 읽기 모드에서도 눌러서 펼쳐 볼 수 있어요)', () => {
+      if (x.toggle) delete x.toggle; else x.toggle = true; changed(); drawEditor();
+    }, 'toggle-btn' + (x.toggle ? ' on' : ''));
     // 끌어서 순서 바꾸기 (⠿ 손잡이 또는 빈 곳을 꾹 눌러서)
     const dragHandle = A.dragHandle;
     const moved = () => { changed(); drawEditor(); };
@@ -795,6 +802,7 @@
         iconBtn(g.folded ? '🙈' : '👁', g.folded ? '숨긴 묶음이에요. 눌러서 다시 보이게' : '이 특기표를 시트에서 숨기기', () => {
           if (g.folded) delete g.folded; else g.folded = true; changed(); drawEditor();
         }, 'fold-btn' + (g.folded ? ' on' : '')),
+        toggleBtn(g),
         iconBtn('×', '삭제', () => {
           if (!gridGuard(g)) return;
           if (!confirm(`"${g.title || g.id}" 특기표를 지울까요?`)) return;
@@ -899,6 +907,7 @@
         iconBtn(s.folded ? '🙈' : '👁', s.folded ? '숨긴 묶음이에요. 눌러서 다시 보이게' : '이 묶음 전체를 시트에서 숨기기', () => {
           if (s.folded) delete s.folded; else s.folded = true; changed(); drawEditor();
         }, 'fold-btn' + (s.folded ? ' on' : '')),
+        toggleBtn(s),
         isList ? null : iconBtn('⇲', '다른 칸 묶음과 합치기', () => {
           if (mergeOpen.has(s)) mergeOpen.delete(s); else mergeOpen.add(s);
           drawEditor();
@@ -948,6 +957,7 @@
       return (h('section', { class: 'card tpl-section' + (isList ? ' is-list' : '') + (s.folded ? ' is-folded' : '') }, head,
         !isList && mergeOpen.has(s) ? mergePanel(s) : null,
         s.folded ? h('span', { class: 'fold-tag' }, '🙈 숨긴 묶음 — 시트에서는 접힌 채로 보이고(눌러서 펼치기), 읽기 모드·공유 화면에서는 안 보여요.') : null,
+        !s.folded && s.toggle ? h('span', { class: 'fold-tag' }, '▸ 접어 둔 카드 — 시트에서는 제목만 보이고, 읽기 모드·공유 화면에서도 눌러서 펼쳐 볼 수 있어요.') : null,
         opts, body));
     }
 
@@ -1084,10 +1094,11 @@
         ] : null,
         sub('메모'),
         textTemplate(cc, 'memo', { rows: 3, placeholder: '예: {직업} / {배경}' }),
-        h('label', { class: 'mini-check' },
-          h('input', { type: 'checkbox', checked: !!cc.color, onchange: e => { if (e.target.checked) cc.color = draft.accent || '#7c5cff'; else delete cc.color; changed(); drawEditor(); } }),
-          '채팅 글자색 지정',
-          cc.color ? h('input', { type: 'color', value: cc.color, oninput: e => { cc.color = e.target.value; changed(); } }) : null),
+        sub('채팅 글자색', '(#ff8800처럼 직접 적거나 {색상코드}처럼 칸에서 불러오기. 비우면 보내지 않아요)'),
+        h('div', { class: 'row tight cc-color-row' },
+          textTemplate(cc, 'color', { single: true, placeholder: '예: {색상코드} 또는 #ff8800' }),
+          h('input', { type: 'color', title: '색을 골라서 넣기', value: /^#[0-9a-f]{6}$/i.test(cc.color || '') ? cc.color : '#7c5cff',
+            oninput: e => { cc.color = e.target.value; changed(); }, onchange: () => drawEditor() })),
         h('details', { class: 'more' }, h('summary', {}, '보내질 데이터 미리보기 (미리보기 칸의 값 기준)'), ccWarn, ccPreview));
       return card;
     }

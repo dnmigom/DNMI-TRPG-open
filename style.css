@@ -712,7 +712,7 @@ main .sheet.canvas { display: grid; grid-template-columns: repeat(var(--cols, 12
 main .sheet.canvas > .card { grid-column: var(--gc); grid-row: var(--gr); min-width: 0; }
 .fields.canvas { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); grid-auto-rows: minmax(30px, auto); gap: 12px; }
 .fields.canvas > .field { grid-column: var(--gc); grid-row: var(--gr); min-width: 0; }
-.fields.canvas > .field > textarea { flex: 1 1 auto; }
+.fields.canvas > .field > textarea:not(.line-text) { flex: 1 1 auto; }
 .fields.canvas.empty { min-height: 60px; }
 /* 좁은 화면: 카드는 배치 순서대로 위에서 아래로 한 줄씩, 칸은 최대 2칸씩 */
 @media (max-width: 700px) {
@@ -804,3 +804,36 @@ main .sheet.canvas > .card { grid-column: var(--gc); grid-row: var(--gr); min-wi
 table.list td textarea.cell-text { min-width: 90px; width: 100%; resize: none; overflow: hidden; line-height: 1.4; font-size: 0.875rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 table.list td .linked-cell { overflow-wrap: anywhere; word-break: keep-all; }
 table.list th { white-space: normal; overflow-wrap: anywhere; }
+
+/* ================= 글자 칸 줄바꿈 ================= */
+textarea.line-text { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.read-text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 2px; line-height: 1.45; }
+.reading .sheet textarea.line-text[readonly], .sheet textarea.line-text[readonly] { background: transparent; border-color: transparent; padding-left: 2px; }
+.sheet h2, .field > span, .rule-tab, .sheet-tab, .char-title strong { overflow-wrap: anywhere; }
+
+/* ================= 읽기 모드 체크: 체크한 것은 강조색으로 ================= */
+.sheet input[type="checkbox"]:disabled {
+  appearance: none; -webkit-appearance: none; width: 18px; height: 18px; flex: none; margin: 0;
+  border: 2px solid var(--line); border-radius: 5px; background: var(--card); opacity: 1; cursor: default;
+}
+.sheet input[type="checkbox"]:disabled:checked {
+  border-color: var(--accent); background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+.sheet .field.is-check:has(input:disabled:checked) > span { color: var(--accent); font-weight: 700; }
+.sheet td:has(> input[type="checkbox"]:disabled:checked) { color: var(--accent); }
+
+/* ================= 접어 둔 카드 (읽기 화면에서도 펼쳐 보기) ================= */
+.toggle-section > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.toggle-section > summary::-webkit-details-marker { display: none; }
+.toggle-section > summary h2 { margin: 0; }
+.toggle-section > summary::after { content: '▸'; margin-left: auto; color: var(--muted); transition: transform .15s; }
+.toggle-section[open] > summary::after { transform: rotate(90deg); }
+.toggle-section[open] > summary { margin-bottom: 14px; }
+.toggle-section[open] .toggle-hint { display: none; }
+.toggle-btn.on { color: var(--accent); border-color: var(--accent); }
+.cc-color-row { align-items: center; flex-wrap: nowrap; }
+.cc-color-row > :first-child { flex: 1 1 auto; }
+.cc-color-row input[type="color"] { width: 44px; height: 36px; padding: 2px; flex: none; }
+main .sheet.canvas > .toggle-card { align-self: start; }
