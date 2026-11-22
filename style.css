@@ -799,3 +799,8 @@ main .sheet.canvas > .card { grid-column: var(--gc); grid-row: var(--gr); min-wi
 .sheet-actions { align-items: flex-end; }
 .sheet-title-field { flex: 0 1 260px; }
 .sheet-title-field input { width: 100%; }
+
+/* 표: 긴 글자는 칸 안에서 줄을 바꿔 모두 보이게 */
+table.list td textarea.cell-text { min-width: 90px; width: 100%; resize: none; overflow: hidden; line-height: 1.4; font-size: 0.875rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+table.list td .linked-cell { overflow-wrap: anywhere; word-break: keep-all; }
+table.list th { white-space: normal; overflow-wrap: anywhere; }

@@ -268,7 +268,7 @@
       const run = () => {
         seedPreview();
         try {
-          previewBody.replaceChildren(A.renderSheet(draft, preview, { readonly: false, onChange: () => activeInput && updateHelper(), datasets }));
+          previewBody.replaceChildren(A.renderSheet(draft, preview, { readonly: false, onChange: () => activeInput && updateHelper(), datasets, exactLayout: true }));
           decorate();
         } catch (e) {
           previewBody.replaceChildren(h('p', { class: 'muted' }, '미리보기를 그리지 못했어요: ' + e.message));

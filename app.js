@@ -1298,7 +1298,7 @@
   // ---------------- 시트 그리기 (모든 룰 공통) ----------------
   const openFolds = new WeakSet(); // 펼쳐 둔 "숨긴 칸"은 다시 그려도 펼친 채로
   const openSections = new WeakSet(); // 펼쳐 둔 "숨긴 묶음"도 마찬가지
-  function renderSheet(template, sheet, { readonly, onChange, accent, datasets }) {
+  function renderSheet(template, sheet, { readonly, onChange, accent, datasets, exactLayout }) {
     sheet.values = sheet.values || {};
     sheet.lists = sheet.lists || {};
     if (!readonly) fillDefaults(template, sheet);
@@ -1402,7 +1402,7 @@
           el.addEventListener('change', commit);
           return el;
         }
-        if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && c.type === 'textarea')) {
+        if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && (c.type === 'textarea' || (c.type || 'text') === 'text'))) {
           return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터에서 불러온 값' : '' }, String(row[c.id] ?? ''));
         }
         if (c.type === 'select') {
@@ -1412,6 +1412,12 @@
           return h('select', { class: 'cell-select', onchange: e => { row[c.id] = e.target.value; changed(); } },
             h('option', { value: '' }, '—'), opts.map(o => h('option', { value: o, selected: o === cur }, o)),
             cur && !opts.includes(cur) ? h('option', { value: cur, selected: true }, cur) : null);
+        }
+        if ((c.type || 'text') === 'text') {
+          // 글자 열: 길어지면 칸 안에서 줄을 바꿔서 다 보이게 (Enter로는 줄을 넣지 않음)
+          return autoGrow(h('textarea', { class: 'cell-text', value: row[c.id] ?? '',
+            onkeydown: e => { if (e.key === 'Enter' && !e.isComposing) e.preventDefault(); },
+            oninput: e => { const v = e.target.value.replace(/\n/g, ' '); if (v !== e.target.value) e.target.value = v; row[c.id] = v; changed(); } }));
         }
         return input(c.type || 'text', row[c.id], v => { row[c.id] = v; }, 2);
       }
@@ -1618,7 +1624,16 @@
           if (rest.length) root.append(h('div', { class: 'sheet-row auto' }, rest));
         }
       }
-    } else root.append(...cards);
+    } else {
+      if (canvas && !exactLayout) {
+        // 시트 화면: 숨긴 카드·빈 카드가 빠진 자리(편집 중에는 접힌 카드의 남는 높이)를 남은 카드가 위로 올라와 채움
+        const shownCards = cardBySection.map((card, i) => [card, (template.sections || [])[i]]).filter(([card]) => card && !card.hidden);
+        const items = shownCards.map(([card, s]) => { const q = posOf(s, CANVAS_COLS); return { card, ...q, h: s.folded ? 1 : q.h }; });
+        settle(items, CANVAS_COLS);
+        for (const it of items) placeStyle(it.card, it, CANVAS_COLS);
+      }
+      root.append(...cards);
+    }
     recompute();
     return root;
   }
