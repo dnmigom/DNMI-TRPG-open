@@ -837,3 +837,12 @@ textarea.line-text { resize: none; overflow: hidden; white-space: pre-wrap; over
 .cc-color-row > :first-child { flex: 1 1 auto; }
 .cc-color-row input[type="color"] { width: 44px; height: 36px; padding: 2px; flex: none; }
 main .sheet.canvas > .toggle-card { align-self: start; }
+
+/* 데이터에서 불러왔지만 시트에서 고칠 수 있는 칸 */
+.linked-edit { position: relative; display: flex; align-items: flex-start; gap: 4px; border-radius: 8px; padding: 2px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.linked-edit > :first-child { flex: 1 1 auto; min-width: 0; }
+.linked-edit.is-edited { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cell-reset { flex: none; padding: 2px 7px; font-size: 0.8125rem; border-radius: 6px; color: var(--accent); }
+.linked-cell.is-edited { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.folded-grid { margin-top: 10px; }

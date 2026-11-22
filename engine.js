@@ -488,12 +488,20 @@
         if (name && !map.has(name)) { map.set(name, e); from.set(name, k); }
       }
     }
-    return { ds: first, keys, keyCol, keyField, map, from, find: name => map.get(String(name ?? '').trim()) || null };
+    // 데이터 편집기에서 "시트에서 고칠 수 있게" 한 항목인지 (그 이름을 가져온 데이터 기준)
+    const editable = (name, fieldId) => {
+      const ds = datasets[from.get(String(name ?? '').trim())] || first;
+      const f = (ds.fields || []).find(x => x.id === fieldId);
+      return !!(f && f.editable);
+    };
+    return { ds: first, keys, keyCol, keyField, map, from, editable, find: name => map.get(String(name ?? '').trim()) || null };
   }
+  // 시트에서 직접 고친 칸(row._edited)은 데이터를 다시 불러와도 그대로 둠
   function fillRowFromEntry(section, row, entry, keyCol) {
     let changed = false;
+    const kept = new Set(Array.isArray(row._edited) ? row._edited : []);
     for (const c of section.columns || []) {
-      if (!c.from || c === keyCol) continue;
+      if (!c.from || c === keyCol || kept.has(c.id)) continue;
       const v = entry[c.from] ?? '';
       if (row[c.id] !== v) { row[c.id] = v; changed = true; }
     }

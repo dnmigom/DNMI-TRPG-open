@@ -201,6 +201,9 @@
                 draft.fields.splice(i, 1); changed(); drawSchema(); drawTable();
               } }, '×')),
             f.type === 'select' ? optionsEditor(f) : null,
+            i === 0 ? null : h('label', { class: 'mini-check', title: '켜면 캐릭터 시트의 표에서 이 항목을 그 시트에서만 고칠 수 있어요. 끄면 데이터 값 그대로 고정돼요.' },
+              h('input', { type: 'checkbox', checked: !!f.editable, onchange: e => { if (e.target.checked) f.editable = true; else delete f.editable; changed(); drawTableHead(); } }),
+              '✎ 캐릭터 시트에서 고칠 수 있게'),
             h('details', { class: 'more' }, h('summary', {}, '더보기'),
               h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (템플릿에서 연결할 때 쓰여요)'), idInput))), f, {
             // 룰 틀에 연결된 데이터는 찾기 이름(첫 번째 항목)을 바꿀 수 없음
@@ -225,7 +228,7 @@
     const tbody = h('tbody');
     const pasteBox = h('div', { class: 'paste-box', hidden: true });
     function drawTableHead() {
-      thead.replaceChildren(h('tr', {}, draft.fields.map(f => h('th', {}, f.label || f.id)), h('th')));
+      thead.replaceChildren(h('tr', {}, draft.fields.map((f, i) => h('th', { title: i && f.editable ? '캐릭터 시트에서 고칠 수 있는 항목' : '' }, f.label || f.id, i && f.editable ? ' ✎' : '')), h('th')));
     }
     function rowEl(e) {
       const tr = h('tr', {},

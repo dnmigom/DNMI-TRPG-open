@@ -1398,8 +1398,11 @@
           // → 한글 조합 중이거나 "힐"처럼 다른 이름의 앞부분일 때 미리 채워지지 않음
           const el = h('input', { type: 'text', value: row[c.id] ?? '', list: listId, placeholder: `${link.keyField.label || '이름'} 입력` });
           const wasLinked = !!link.find(row[c.id]);
+          let before = row[c.id] ?? '';
           const commit = () => {
             const entry = link.find(el.value);
+            if (String(el.value).trim() !== String(before).trim()) delete row._edited; // 다른 데이터를 불러오면 직접 고친 것은 초기화
+            before = el.value;
             if (entry) E.fillRowFromEntry(s, row, entry, link.keyCol);
             else if (wasLinked) for (const col of cols) if (col.from && col !== link.keyCol) delete row[col.id]; // 다른 이름으로 바꾸면 예전 내용은 비움
             if (entry || wasLinked) { if (onChange) onChange(); draw(); }
@@ -1413,9 +1416,37 @@
           el.addEventListener('change', commit);
           return el;
         }
-        if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && (c.type === 'textarea' || (c.type || 'text') === 'text'))) {
+        const entry = link && c.from && c !== link.keyCol ? link.find(row[link.keyCol.id]) : null;
+        const edited = Array.isArray(row._edited) && row._edited.includes(c.id);
+        if (entry && !readonly && link.editable(row[link.keyCol.id], c.from)) {
+          // 데이터에서 불러왔지만 시트에서 고칠 수 있는 칸: 고치면 데이터 값 대신 이 값을 씀 (↺로 데이터 값으로 되돌리기)
+          const reset = h('button', { type: 'button', class: 'cell-reset', title: '데이터 값으로 되돌리기', hidden: !edited,
+            onclick: () => {
+              row[c.id] = entry[c.from] ?? '';
+              row._edited = (row._edited || []).filter(x => x !== c.id);
+              if (!row._edited.length) delete row._edited;
+              if (onChange) onChange(); draw();
+            } }, '↺');
+          const ed = plainCell(c, row);
+          const mark = () => {
+            const same = String(row[c.id] ?? '') === String(entry[c.from] ?? '');
+            const list = new Set(Array.isArray(row._edited) ? row._edited : []);
+            if (same) list.delete(c.id); else list.add(c.id);
+            if (list.size) row._edited = [...list]; else delete row._edited;
+            reset.hidden = same;
+            wrap.classList.toggle('is-edited', !same);
+          };
+          ed.addEventListener('input', mark); ed.addEventListener('change', mark);
+          const wrap = h('div', { class: 'linked-edit' + (edited ? ' is-edited' : ''), title: '데이터에서 불러온 값이에요. 이 시트에서만 고칠 수 있어요.' }, ed, reset);
+          return wrap;
+        }
+        if (entry || (readonly && (c.type === 'textarea' || (c.type || 'text') === 'text'))) {
+          if (entry && edited) return h('div', { class: 'linked-cell is-linked is-edited', title: '데이터 값을 이 시트에서 고친 값' }, String(row[c.id] ?? ''));
           return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터에서 불러온 값' : '' }, String(row[c.id] ?? ''));
         }
+        return plainCell(c, row);
+      }
+      function plainCell(c, row) {
         if (c.type === 'select') {
           // 선택 목록 열: 고르기만 하면 됨 (선택지에 없는 예전 값도 그대로 보여 줌)
           const cur = String(row[c.id] ?? ''), opts = c.options || [];
@@ -1556,6 +1587,22 @@
       root.style.setProperty('--cards-md', Math.min(cardsPerRow, 2));
     }
 
+    // 숨긴 칸 보기: 카드 안 격자의 가로 칸 수를 따라 차례대로 채움 (칸 너비는 정한 너비 그대로)
+    function foldedGrid(s, folded) {
+      const cols = Math.max(1, Math.min(12, Math.floor(s.cols) || 4));
+      const grid = h('div', { class: 'fields canvas folded-grid' });
+      grid.style.setProperty('--cols', cols);
+      grid.style.setProperty('--cols-m', Math.min(cols, 2));
+      for (const f of folded) {
+        const el = renderField(f);
+        const w = Math.min(posOf(f, cols).w, cols);
+        el.style.setProperty('--gc', `auto / span ${w}`);
+        el.style.setProperty('--gr', 'auto');
+        el.style.setProperty('--gcm', `auto / span ${Math.min(w, Math.min(cols, 2))}`);
+        grid.append(el);
+      }
+      return grid;
+    }
     const cardBySection = (template.sections || []).map((s, si) => {
       // 숨긴 묶음: 읽기·공유 화면에서는 아예 빼고, 편집할 때는 접힌 카드로 (눌러서 펼침)
       if (s.folded && readonly) return null;
@@ -1607,7 +1654,7 @@
       if (folded.length && !readonly) {
         const det = h('details', { class: 'folded-fields', open: openFolds.has(s),
           ontoggle: e => { if (e.target.open) openFolds.add(s); else openFolds.delete(s); } },
-          h('summary', {}, `숨긴 칸 ${folded.length}개 보기`), box(folded.map(renderField)));
+          h('summary', {}, `숨긴 칸 ${folded.length}개 보기`), canvas ? foldedGrid(s, folded) : box(folded.map(renderField)));
         card.append(det);
       }
       if (readonly && !shown.length) card.hidden = true;

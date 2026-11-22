@@ -1350,7 +1350,7 @@
             h('div', { class: 'cv-size', title: '끌어서 크기 바꾸기' }));
           card.addEventListener('pointerdown', e => press(e, card, 'card'));
         }
-        for (const fe of sheetEl.querySelectorAll('.fields.canvas > .field[data-ref]')) {
+        for (const fe of sheetEl.querySelectorAll('.fields.canvas:not(.folded-grid) > .field[data-ref]')) {
           const hit = findField(fe.dataset.ref);
           if (!hit) continue;
           fe._obj = hit.f; fe._sec = hit.s;
