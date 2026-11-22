@@ -52,9 +52,24 @@
   async function showTemplateList() {
     A.loading();
     try {
-      const templates = await A.loadTemplates(true);
-      const cards = Object.entries(templates).map(([k, t]) => {
-        const c = h('div', { class: 'sheet-card' },
+      const [templates, order] = await Promise.all([A.loadTemplates(true), A.loadOrder()]);
+      const prefs = A.listPrefs('templates', 'custom');
+      const SORTS = [['custom', '직접 배치'], ['name', '이름 가나다순']];
+      if (!SORTS.some(x => x[0] === prefs.sort)) prefs.sort = 'custom';
+      const customKeys = () => A.applyOrder(Object.keys(templates), order.templates);
+      const sortedKeys = () => prefs.sort === 'name'
+        ? [...customKeys()].sort((a, b) => A.byName(templates[a].rule || a, templates[b].rule || b)) : customKeys();
+      const bar = h('div', { class: 'filter-bar' });
+      const list = h('div', { class: 'sheet-list' });
+      async function dropped(keys) {
+        order.templates = keys;
+        if (prefs.sort !== 'custom') { prefs.sort = 'custom'; A.saveListPrefs('templates', prefs); A.toast('정렬을 "직접 배치"로 바꿨어요.'); }
+        draw();
+        try { await A.saveOrder('templates', keys); } catch (e) { A.toast('순서를 저장하지 못했어요: ' + e.message, true); }
+      }
+      function card(k) {
+        const t = templates[k];
+        const c = h('div', { class: 'sheet-card', 'data-key': k },
           h('strong', {}, t.rule || k),
           h('span', { class: 'muted' }, t.error || t.description || ''),
           h('div', { class: 'row' },
@@ -62,12 +77,20 @@
             h('a', { class: 'button-link', href: `#/template/new?from=${encodeURIComponent(k)}` }, '복제')));
         c.style.setProperty('--accent', t.accent || '');
         return c;
-      });
+      }
+      function draw() {
+        bar.replaceChildren(...A.listTools(prefs, SORTS, () => { A.saveListPrefs('templates', prefs); draw(); }));
+        const keys = sortedKeys();
+        list.className = `sheet-list size-${prefs.size}`;
+        list.replaceChildren(...(keys.length ? keys.map(card) : [h('p', { class: 'muted' }, '아직 템플릿이 없어요.')]));
+        A.sortableCards(list, dropped);
+      }
+      draw();
       A.show(
-        h('div', { class: 'toolbar' }, h('h1', {}, '룰 틀 보관함'),
-          h('button', { class: 'primary', onclick: () => A.go('/template/new') }, '+ 새 룰 틀')),
-        h('p', { class: 'muted' }, '룰마다 시트에 들어갈 칸과 계산식을 정해 두는 곳이에요. 비슷한 룰은 "복제"해서 고치면 편해요.'),
-        h('div', { class: 'sheet-list' }, cards.length ? cards : h('p', { class: 'muted' }, '아직 룰 틀이 없어요.')));
+        h('div', { class: 'toolbar' }, h('h1', {}, '시트 템플릿'),
+          h('button', { class: 'primary', onclick: () => A.go('/template/new') }, '+ 새 시트 템플릿')),
+        h('p', { class: 'muted' }, '룰마다 시트에 들어갈 칸과 계산식을 정해 두는 곳이에요. 비슷한 룰은 "복제"해서 고치면 편해요. 카드를 꾹 누르면 순서를 바꿀 수 있어요.'),
+        bar, list);
     } catch (e) { A.failed(e); }
   }
 
@@ -586,7 +609,7 @@
           return el;
         }
         if (link && c.from && link.find(row[link.keyCol.id])) {
-          return h('div', { class: 'linked-cell is-linked', title: '데이터 보관함에서 불러온 값' }, String(row[c.id] ?? ''));
+          return h('div', { class: 'linked-cell is-linked', title: '데이터에서 불러온 값' }, String(row[c.id] ?? ''));
         }
         if (c.type === 'checkbox') return h('input', { type: 'checkbox', checked: !!row[c.id], onchange: e => { row[c.id] = e.target.checked; sync(); changed(); } });
         if (c.type === 'select') {
@@ -665,7 +688,7 @@
       }
 
       if (!keys.length) {
-        return h('div', { class: 'data-link muted small' }, '데이터 보관함에 데이터를 만들면 이 표에 연결해서 이름만 입력해도 내용이 채워지게 할 수 있어요. ',
+        return h('div', { class: 'data-link muted small' }, '위쪽 "데이터" 메뉴에서 데이터를 만들면 이 표에 연결해서 이름만 입력해도 내용이 채워지게 할 수 있어요. ',
           h('a', { href: '#/data/new' }, '데이터 만들기'));
       }
       // ----- 함께 불러올 데이터 (항목 구성이 첫 데이터와 같은 것만) -----
@@ -707,7 +730,7 @@
           dup ? h('p', { class: 'muted small' }, `같은 ${ds.fields[0].label || '이름'}이 여러 데이터에 ${dup}개 있어요. 이럴 땐 위쪽(먼저 연결한) 데이터의 내용을 불러와요.`) : null);
       }
       return h('div', { class: 'data-link' },
-        h('label', { class: 'mini-field' }, h('span', {}, '데이터 보관함 연결'), select),
+        h('label', { class: 'mini-field' }, h('span', {}, '데이터 연결'), select),
         alsoBox,
         ds ? [
           h('div', { class: 'sub-title' }, '불러올 항목 ', h('span', { class: 'muted' }, '(체크한 항목이 열로 생겨요)')),
@@ -715,7 +738,7 @@
             h('input', { type: 'checkbox', checked: idx === 0 || l.columns.some(c => c.from === fld.id), disabled: idx === 0,
               onchange: e => toggleField(fld, e.target.checked) }),
             fld.label || fld.id, idx === 0 ? h('small', { class: 'muted' }, ' (찾기 이름)') : null))),
-          h('p', { class: 'muted small' }, `시트에서 "${(l.columns.find(c => c.from === ds.fields[0].id) || {}).label || ''}" 열에 ${ds.fields[0].label || '이름'}을 입력하면 나머지가 자동으로 채워져요. 데이터 보관함에서 내용을 고치면 시트에도 바로 반영돼요.`),
+          h('p', { class: 'muted small' }, `시트에서 "${(l.columns.find(c => c.from === ds.fields[0].id) || {}).label || ''}" 열에 ${ds.fields[0].label || '이름'}을 입력하면 나머지가 자동으로 채워져요. "데이터"에서 내용을 고치면 시트에도 바로 반영돼요.`),
         ] : null);
     }
 
@@ -1210,18 +1233,18 @@
       let saveKey = key;
       if (isNew) {
         saveKey = fileKey(draft.rule);
-        if (templates[saveKey]) return A.toast('같은 이름의 룰 틀이 이미 있어요. 룰 이름을 바꿔 주세요.', true);
+        if (templates[saveKey]) return A.toast('같은 이름의 템플릿이 이미 있어요. 룰 이름을 바꿔 주세요.', true);
       }
       btn.disabled = true;
       try {
-        sha = await A.writeJson(`templates/${saveKey}.json`, cleaned(), sha, `룰 틀 ${isNew ? '생성' : '수정'}: ${draft.rule}`);
+        sha = await A.writeJson(`templates/${saveKey}.json`, cleaned(), sha, `템플릿 ${isNew ? '생성' : '수정'}: ${draft.rule}`);
         A.resetTemplates();
         A.setDirty(false);
-        A.toast('룰 틀을 저장했어요. 이 틀을 쓰는 캐릭터 시트에 바로 반영돼요.');
+        A.toast('템플릿을 저장했어요. 이 틀을 쓰는 캐릭터 시트에 바로 반영돼요.');
         if (!isNew) {
           A.refreshShares({ templateKey: saveKey }).then(({ ok, fail }) => {
             if (fail) A.toast(`공유본 ${fail}개를 새로 올리지 못했어요. 해당 캐릭터를 열어 저장하면 다시 올라가요.`, true);
-            else if (ok) A.toast(`룰 틀을 저장했어요. 공유 중인 시트 ${ok}개도 새로 반영했어요.`);
+            else if (ok) A.toast(`템플릿을 저장했어요. 공유 중인 시트 ${ok}개도 새로 반영했어요.`);
           }).catch(() => {});
         }
         if (goList) A.go('/templates');
@@ -1236,8 +1259,8 @@
           A.toast(`이 룰 시트를 가진 캐릭터가 ${using.length}명 있어서 삭제할 수 없어요. (${using.slice(0, 3).map(s => s.name).join(', ')}${using.length > 3 ? ' …' : ''})`, true);
           btn.disabled = false; return;
         }
-        if (!confirm(`"${draft.rule}" 룰 틀을 삭제할까요?`)) { btn.disabled = false; return; }
-        await A.deleteFile(`templates/${key}.json`, sha, `룰 틀 삭제: ${draft.rule}`);
+        if (!confirm(`"${draft.rule}" 템플릿을 삭제할까요?`)) { btn.disabled = false; return; }
+        await A.deleteFile(`templates/${key}.json`, sha, `템플릿 삭제: ${draft.rule}`);
         A.resetTemplates(); A.setDirty(false);
         A.toast('삭제했어요.');
         A.go('/templates');
@@ -1268,8 +1291,8 @@
     A.show(
       h('div', { class: 'sheet-head' },
         h('div', { class: 'title-row' },
-          h('a', { class: 'back-link', href: '#/templates', title: '룰 틀 보관함 목록으로' }, '← 룰 틀 보관함'),
-          h('h1', { class: 'page-title' }, isNew ? '새 룰 틀' : '룰 틀 편집')),
+          h('a', { class: 'back-link', href: '#/templates', title: '시트 템플릿 목록으로' }, '← 시트 템플릿'),
+          h('h1', { class: 'page-title' }, isNew ? '새 템플릿' : '템플릿 편집')),
         h('div', { class: 'row' }, saveBtn,
           h('button', { class: 'save-list-btn', onclick: e => save(e.target, true) }, '저장하고 목록으로'),
           isNew ? null : h('a', { class: 'button-link', href: `#/template/new?from=${encodeURIComponent(key)}` }, '복제'),

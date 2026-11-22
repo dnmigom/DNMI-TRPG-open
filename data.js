@@ -33,28 +33,64 @@
   async function showDataList() {
     A.loading();
     try {
-      const [datasets, templates] = await Promise.all([A.loadDatasets(true), A.loadTemplates()]);
-      const groups = new Map();
-      for (const [k, d] of Object.entries(datasets)) {
-        const g = d.rule ? ((templates[d.rule] && templates[d.rule].rule) || d.rule) : '공용 (룰 없음)';
-        if (!groups.has(g)) groups.set(g, []);
-        groups.get(g).push([k, d]);
+      const [datasets, templates, order] = await Promise.all([A.loadDatasets(true), A.loadTemplates(), A.loadOrder()]);
+      const prefs = A.listPrefs('datasets', 'rule');
+      const SORTS = [['custom', '직접 배치'], ['name', '이름 가나다순'], ['rule', '룰 순서'], ['count', '항목 많은 순']];
+      if (!SORTS.some(x => x[0] === prefs.sort)) prefs.sort = 'rule';
+      const tplOrder = A.applyOrder(Object.keys(templates), order.templates);
+      const customKeys = () => A.applyOrder(Object.keys(datasets), order.datasets);
+      const groupOf = d => (d.rule ? ((templates[d.rule] && templates[d.rule].rule) || d.rule) : '공용 (룰 없음)');
+      const groupRank = d => { const i = d.rule ? tplOrder.indexOf(d.rule) : -1; return d.rule ? (i < 0 ? 9998 : i) : 9999; };
+      function sortedKeys() {
+        const keys = customKeys();
+        if (prefs.sort === 'name') return keys.sort((a, b) => A.byName(datasets[a].name || a, datasets[b].name || b));
+        if (prefs.sort === 'count') return keys.sort((a, b) => (datasets[b].entries || []).length - (datasets[a].entries || []).length);
+        if (prefs.sort === 'rule') return keys.sort((a, b) => groupRank(datasets[a]) - groupRank(datasets[b]) || A.byName(groupOf(datasets[a]), groupOf(datasets[b])));
+        return keys;
       }
-      const sections = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([g, list]) => h('section', { class: 'data-group' },
-        h('h2', {}, g),
-        h('div', { class: 'sheet-list' }, list.map(([k, d]) => {
-          const card = h('a', { class: 'sheet-card', href: `#/data/${encodeURIComponent(k)}` },
-            h('strong', {}, d.name || k),
-            h('span', { class: 'muted' }, d.error || `${(d.entries || []).length}개 · ${(d.fields || []).map(f => f.label || f.id).join(' / ')}`));
-          const t = d.rule && templates[d.rule];
-          card.style.setProperty('--accent', (t && t.accent) || '');
-          return card;
-        }))));
+      const bar = h('div', { class: 'filter-bar' });
+      const body = h('div', {});
+      let lists = [];
+      async function dropped() {
+        // 룰 순서로 묶어 볼 때는 묶음 안에서만 옮길 수 있고, 묶음 순서는 그대로
+        const visible = lists.flatMap(l => [...l.children].map(c => c.dataset.key).filter(Boolean));
+        const next = prefs.sort === 'custom' || prefs.sort === 'rule' ? A.mergeVisible(customKeys(), visible) : visible;
+        order.datasets = next;
+        if (prefs.sort !== 'custom' && prefs.sort !== 'rule') { prefs.sort = 'custom'; A.saveListPrefs('datasets', prefs); A.toast('정렬을 "직접 배치"로 바꿨어요.'); }
+        draw();
+        try { await A.saveOrder('datasets', next); } catch (e) { A.toast('순서를 저장하지 못했어요: ' + e.message, true); }
+      }
+      function card(k) {
+        const d = datasets[k];
+        const c = h('a', { class: 'sheet-card', 'data-key': k, href: `#/data/${encodeURIComponent(k)}` },
+          h('strong', {}, d.name || k),
+          h('span', { class: 'muted' }, d.error || `${prefs.sort === 'rule' ? '' : groupOf(d) + ' · '}${(d.entries || []).length}개 · ${(d.fields || []).map(f => f.label || f.id).join(' / ')}`));
+        const t = d.rule && templates[d.rule];
+        c.style.setProperty('--accent', (t && t.accent) || '');
+        return c;
+      }
+      const listEl = keys => {
+        const el = h('div', { class: `sheet-list size-${prefs.size}` }, keys.map(card));
+        lists.push(el);
+        return A.sortableCards(el, dropped);
+      };
+      function draw() {
+        bar.replaceChildren(...A.listTools(prefs, SORTS, () => { A.saveListPrefs('datasets', prefs); draw(); }));
+        const keys = sortedKeys();
+        lists = [];
+        if (!keys.length) return body.replaceChildren(h('p', { class: 'muted' }, '아직 데이터가 없어요.'));
+        if (prefs.sort === 'rule') {
+          const groups = new Map();
+          for (const k of keys) { const g = groupOf(datasets[k]); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); }
+          body.replaceChildren(...[...groups.entries()].map(([g, ks]) => h('section', { class: 'data-group' }, h('h2', {}, g), listEl(ks))));
+        } else body.replaceChildren(listEl(keys));
+      }
+      draw();
       A.show(
-        h('div', { class: 'toolbar' }, h('h1', {}, '데이터 보관함'),
+        h('div', { class: 'toolbar' }, h('h1', {}, '데이터'),
           h('button', { class: 'primary', onclick: () => A.go('/data/new') }, '+ 새 데이터')),
-        h('p', { class: 'muted' }, '스킬·아이템·주문처럼 여러 캐릭터가 같이 쓰는 데이터를 룰별로 모아 두는 곳이에요. 룰 틀의 표에 연결하면 이름만 입력해도 나머지 내용이 채워져요.'),
-        sections.length ? sections : h('p', { class: 'muted' }, '아직 데이터가 없어요.'));
+        h('p', { class: 'muted' }, '스킬·아이템·주문처럼 여러 캐릭터가 같이 쓰는 데이터를 룰별로 모아 두는 곳이에요. 템플릿의 표에 연결하면 이름만 입력해도 나머지 내용이 채워져요. 카드를 꾹 누르면 순서를 바꿀 수 있어요.'),
+        bar, body);
     } catch (e) { A.failed(e); }
   }
 
@@ -87,7 +123,7 @@
     function fieldGuard(f, what) {
       const u = fieldUse(f);
       if (!u.length) return true;
-      A.toast(`"${f.label || f.id}" 항목은 ${u.map(x => `${x.rule}의 "${x.table}" 표`).join(', ')}에 연결돼 있어서 ${what} 수 없어요. 룰 틀에서 연결을 먼저 풀어 주세요.`, true);
+      A.toast(`"${f.label || f.id}" 항목은 ${u.map(x => `${x.rule}의 "${x.table}" 표`).join(', ')}에 연결돼 있어서 ${what} 수 없어요. 템플릿에서 연결을 먼저 풀어 주세요.`, true);
       return false;
     }
     function renameField(f, newId) {
@@ -143,7 +179,7 @@
             manual.add(f); renameField(f, v); changed(); drawTable();
           });
           return A.draggable(h('div', { class: 'tpl-item' + (i === 0 ? ' is-formula' : '') },
-            i === 0 ? h('span', { class: 'link-tag' }, '🔎 찾기 이름 — 룰 틀에서 이 항목으로 데이터를 찾아요') : null,
+            i === 0 ? h('span', { class: 'link-tag' }, '🔎 찾기 이름 — 템플릿에서 이 항목으로 데이터를 찾아요') : null,
             h('div', { class: 'item-head' }, A.dragHandle(),
               h('input', { class: 'label-input', value: f.label || '', placeholder: '항목 이름', oninput: e => {
                 f.label = e.target.value;
@@ -166,10 +202,10 @@
               } }, '×')),
             f.type === 'select' ? optionsEditor(f) : null,
             h('details', { class: 'more' }, h('summary', {}, '더보기'),
-              h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (룰 틀에서 연결할 때 쓰여요)'), idInput))), f, {
+              h('label', { class: 'mini-field' }, h('span', {}, '저장용 이름 (템플릿에서 연결할 때 쓰여요)'), idInput))), f, {
             // 룰 틀에 연결된 데이터는 찾기 이름(첫 번째 항목)을 바꿀 수 없음
             canMove: ({ oldIdx, newIdx }) => {
-              if ((oldIdx === 0 || newIdx === 0) && usedBy.length) { A.toast('룰 틀에 연결된 데이터라 찾기 이름(첫 번째 항목)은 바꿀 수 없어요.', true); return false; }
+              if ((oldIdx === 0 || newIdx === 0) && usedBy.length) { A.toast('템플릿에 연결된 데이터라 찾기 이름(첫 번째 항목)은 바꿀 수 없어요.', true); return false; }
               return true;
             },
             onMoved: () => { changed(); drawSchema(); drawTable(); },
@@ -299,7 +335,7 @@
       const blank = names.filter(n => !n).length;
       const dup = names.filter((n, i) => n && names.indexOf(n) !== i);
       if ((blank || dup.length) && !confirm(
-        (blank ? `${draft.fields[0].label || '이름'}이 비어 있는 줄이 ${blank}개 있어요. 이런 줄은 룰 틀에서 불러올 수 없어요.\n` : '') +
+        (blank ? `${draft.fields[0].label || '이름'}이 비어 있는 줄이 ${blank}개 있어요. 이런 줄은 템플릿에서 불러올 수 없어요.\n` : '') +
         (dup.length ? `같은 ${draft.fields[0].label || '이름'}이 여러 번 있어요: ${[...new Set(dup)].slice(0, 5).join(', ')}. 맨 위의 것만 불러와져요.\n` : '') +
         '그래도 저장할까요?')) return;
       // 같은 표에 함께 연결된 데이터와 항목 구성이 달라지면 알려 줌
@@ -330,7 +366,7 @@
       } catch (e) { A.toast(e.message, true); btn.disabled = false; }
     }
     async function remove(btn) {
-      if (usedBy.length) return A.toast(`${usedBy.map(u => `${u.rule}의 "${u.table}" 표`).join(', ')}에 연결돼 있어서 지울 수 없어요. 룰 틀에서 연결을 먼저 풀어 주세요.`, true);
+      if (usedBy.length) return A.toast(`${usedBy.map(u => `${u.rule}의 "${u.table}" 표`).join(', ')}에 연결돼 있어서 지울 수 없어요. 템플릿에서 연결을 먼저 풀어 주세요.`, true);
       if (!confirm(`"${draft.name}" 데이터를 삭제할까요? 되돌릴 수 없어요.`)) return;
       btn.disabled = true;
       try {
@@ -351,7 +387,7 @@
     A.show(
       h('div', { class: 'sheet-head' },
         h('div', { class: 'title-row' },
-          h('a', { class: 'back-link', href: '#/data', title: '데이터 보관함 목록으로' }, '← 데이터 보관함'),
+          h('a', { class: 'back-link', href: '#/data', title: '데이터 목록으로' }, '← 데이터'),
           h('h1', { class: 'page-title' }, isNew ? '새 데이터' : (draft.name || key))),
         h('div', { class: 'row' }, saveBtn,
           h('button', { class: 'save-list-btn', onclick: e => save(e.target, true) }, '저장하고 목록으로'),
@@ -364,7 +400,7 @@
                 h('input', { value: draft.name || '', placeholder: '예: 스킬, 아이템, 주문', oninput: e => { draft.name = e.target.value; changed(); updateFile(); } })),
               h('label', { class: 'mini-field' }, h('span', {}, '룰'), ruleSelect)),
             fileLabel,
-            usedBy.length ? h('p', { class: 'muted small' }, '연결된 룰 틀: ' + usedBy.map(u => `${u.rule}의 "${u.table}" 표` +
+            usedBy.length ? h('p', { class: 'muted small' }, '연결된 템플릿: ' + usedBy.map(u => `${u.rule}의 "${u.table}" 표` +
               (u.partners && u.partners.length ? ` (함께: ${u.partners.map(k => (datasets[k] && datasets[k].name) || k).join(', ')})` : '')).join(', ')) : null),
           schemaCard),
         h('section', { class: 'card data-table-card' },

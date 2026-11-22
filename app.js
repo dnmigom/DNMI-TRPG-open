@@ -1,5 +1,5 @@
 /*
- * app.js — 캐릭터 시트 보관함
+ * app.js — 단미 TRPG 시트 보관함
  * - 캐릭터:   비공개 저장소의 characters/*.json (캐릭터 하나에 룰별 시트 여러 장)
  * - 인장:     비공개 저장소의 images/<캐릭터id>/ (또는 바깥 이미지 주소)
  * - 룰별 틀:  비공개 저장소의 templates/*.json
@@ -90,6 +90,10 @@
     const pct = Number(v && v.width);
     if (pct >= 30 && pct <= 100) document.documentElement.style.setProperty('--page-max', pct + 'vw');
     else document.documentElement.style.removeProperty('--page-max');
+    // 글씨 크기: 10% ~ 150% (모든 글씨가 rem 단위라 한꺼번에 바뀜)
+    const fs = Number(v && v.font);
+    if (fs >= 10 && fs <= 150 && fs !== 100) document.documentElement.style.fontSize = fs + '%';
+    else document.documentElement.style.removeProperty('font-size');
   }
   let view = loadView();
   applyView(view);
@@ -343,7 +347,29 @@
           try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {}
           applyView(view); pctLabel.textContent = '기본'; range.value = 70;
         } }, '기본으로')));
-    show(viewCard, h('form', { class: 'card narrow', onsubmit: connect },
+    // 글씨 크기
+    const saveView = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {} };
+    const fontNow = () => Number(view.font) || 100;
+    const fontLabel = h('strong', { class: 'font-pct' }, `${fontNow()}%`);
+    const setFont = pct => {
+      pct = Math.max(10, Math.min(150, Math.round(pct / 5) * 5));
+      view = { ...view, font: pct };
+      if (pct === 100) delete view.font;
+      fontLabel.textContent = `${pct}%`; fontRange.value = pct;
+      applyView(view); saveView();
+    };
+    const fontRange = h('input', { type: 'range', min: 10, max: 150, step: 5, value: fontNow(), 'aria-label': '글씨 크기', oninput: e => setFont(Number(e.target.value)) });
+    const fontCard = h('div', { class: 'card narrow view-card' },
+      h('h2', {}, '글씨 크기'),
+      h('p', { class: 'muted' }, '사이트 전체 글씨 크기를 10%부터 150%까지 바꿔요. 이 브라우저에만 저장돼요.'),
+      h('div', { class: 'row' }, h('span', {}, '글씨'),
+        h('button', { type: 'button', class: 'small-btn', 'aria-label': '작게', onclick: () => setFont(fontNow() - 5) }, '−'),
+        fontRange,
+        h('button', { type: 'button', class: 'small-btn', 'aria-label': '크게', onclick: () => setFont(fontNow() + 5) }, '+'),
+        fontLabel,
+        h('button', { type: 'button', onclick: () => setFont(100) }, '기본으로')),
+      h('p', { class: 'font-sample' }, '가나다 ABC 123 — 이 정도 크기로 보여요.'));
+    show(fontCard, viewCard, h('form', { class: 'card narrow', onsubmit: connect },
       h('h2', {}, '연결 설정'),
       h('p', { class: 'muted' }, '시트가 저장될 비공개 저장소와 토큰을 입력해 주세요. 이 정보는 지금 쓰는 브라우저에만 저장돼요.'),
       h('label', { class: 'field' }, h('span', {}, 'GitHub 사용자명'), owner),
@@ -523,9 +549,34 @@
   async function showHome() {
     loading();
     try {
-      const [templates, chars, oldSheets] = await Promise.all([
-        loadTemplates(), loadCharacters(), listDir('sheets').then(f => f.filter(x => x.name.endsWith('.json'))),
+      const [templates, chars, oldSheets, order] = await Promise.all([
+        loadTemplates(), loadCharacters(), listDir('sheets').then(f => f.filter(x => x.name.endsWith('.json'))), loadOrder(),
       ]);
+      const prefs = listPrefs('characters', 'custom');
+      const SORTS = [['custom', '직접 배치'], ['name', '이름 가나다순'], ['rule', '룰 순서'], ['updated', '최근 수정순'], ['created', '만든 순']];
+      if (!SORTS.some(x => x[0] === prefs.sort)) prefs.sort = 'custom';
+      const tplRank = new Map(applyOrder(Object.keys(templates), order.templates).map((k, i) => [k, i]));
+      const ruleRank = c => Math.min(...Object.keys(c.sheets || {}).map(k => tplRank.has(k) ? tplRank.get(k) : 9999), 99999);
+      const customIds = () => applyOrder(chars.map(c => c.id), order.characters, true);
+      function sorted(list) {
+        const pos = new Map(customIds().map((k, i) => [k, i]));
+        const base = [...list].sort((a, b) => pos.get(a.id) - pos.get(b.id)); // 같은 값끼리는 직접 배치한 순서대로
+        const cmp = {
+          name: (a, b) => byName(a.name, b.name),
+          rule: (a, b) => ruleRank(a) - ruleRank(b),
+          updated: (a, b) => String(b.updated || '').localeCompare(String(a.updated || '')),
+          created: (a, b) => String(a.created || '').localeCompare(String(b.created || '')),
+        }[prefs.sort];
+        return cmp ? base.sort(cmp) : base;
+      }
+      async function dropped(visibleKeys) {
+        const full = prefs.sort === 'custom' ? customIds() : sorted(chars).map(c => c.id);
+        const next = mergeVisible(full, visibleKeys);
+        order.characters = next;
+        if (prefs.sort !== 'custom') { prefs.sort = 'custom'; saveListPrefs('characters', prefs); toast('정렬을 "직접 배치"로 바꿨어요.'); }
+        draw();
+        try { await saveOrder('characters', next); } catch (e) { toast('순서를 저장하지 못했어요: ' + e.message, true); }
+      }
       const search = h('input', { type: 'search', placeholder: '캐릭터 검색', class: 'search', value: homeFilter.q });
       const grid = h('div', { class: 'char-list' });
       const filterBar = h('div', { class: 'filter-bar' });
@@ -561,16 +612,17 @@
           ['눈 색', swatchRow('eye', f.eye, (c, code) => eyesOf(c).includes(code))],
         ].filter(g => g && g[1].some(Boolean));
         const active = f.rules.size + f.hair.size + f.eye.size;
-        filterBar.replaceChildren(...groups.map(([label, items]) => h('div', { class: 'filter-group' }, h('span', { class: 'filter-label' }, label), items)),
+        filterBar.replaceChildren(...listTools(prefs, SORTS, () => { saveListPrefs('characters', prefs); draw(); }), ...groups.map(([label, items]) => h('div', { class: 'filter-group' }, h('span', { class: 'filter-label' }, label), items)),
           ...(active ? [h('button', { type: 'button', class: 'ghost small-btn', onclick: () => { f.rules.clear(); f.hair.clear(); f.eye.clear(); draw(); } }, '필터 지우기')] : []));
-        filterBar.hidden = !groups.length;
       }
       function draw() {
         f.q = search.value.trim();
-        const list = chars.filter(c => passes(c));
+        const list = sorted(chars.filter(c => passes(c)));
         drawFilters();
+        grid.className = `char-list size-${prefs.size}`;
         grid.replaceChildren(...(list.length ? list.map(charCard) : [h('p', { class: 'muted' },
           chars.length ? '조건에 맞는 캐릭터가 없어요.' : '아직 캐릭터가 없어요. "새 캐릭터"로 첫 캐릭터를 만들어 보세요.')]));
+        sortableCards(grid, dropped);
       }
       function charCard(c) {
         const img = h('img', { alt: '', loading: 'lazy' });
@@ -581,7 +633,7 @@
         if (kind) imageSrc(c.images[kind]).then(src => { if (src) img.src = src; else thumb.classList.add('empty'); }).catch(() => thumb.classList.add('empty'));
         else thumb.classList.add('empty');
         const keys = Object.keys(c.sheets || {});
-        return h('a', { class: 'char-card', href: `#/c/${encodeURIComponent(c.id)}` }, thumb,
+        return h('a', { class: 'char-card', 'data-key': c.id, href: `#/c/${encodeURIComponent(c.id)}` }, thumb,
           h('div', { class: 'char-info' },
             h('div', { class: 'char-title' }, h('strong', {}, c.name || '(이름 없음)'), colorDots(c.colors)),
             h('div', { class: 'rule-chips' }, keys.length ? keys.map(k => {
@@ -879,8 +931,8 @@
           char.sheets[k] = blankSheet(templates[k]);
           markDirty();
           selectSheet(k);
-        } }, '추가')] : h('span', { class: 'muted small' }, '추가할 수 있는 룰 틀이 없어요.'),
-        h('a', { href: '#/template/new', class: 'small-link' }, '+ 새 룰 틀 만들기'));
+        } }, '추가')] : h('span', { class: 'muted small' }, '추가할 수 있는 템플릿이 없어요.'),
+        h('a', { href: '#/template/new', class: 'small-link' }, '+ 새 시트 템플릿 만들기'));
       ruleTabs.replaceChildren(
         ...sheetKeys().map(k => {
           const t = templates[k] || {};
@@ -906,7 +958,7 @@
       const sheet = char.sheets[key];
       const template = templates[key];
       if (!template) {
-        sheetArea.replaceChildren(h('div', { class: 'card notice' }, `이 시트의 룰 틀(templates/${key}.json)을 찾을 수 없어요.`));
+        sheetArea.replaceChildren(h('div', { class: 'card notice' }, `이 시트의 템플릿(templates/${key}.json)을 찾을 수 없어요.`));
         return;
       }
       const shareBox = h('span', { class: 'share-tools row tight' });
@@ -963,7 +1015,7 @@
             sheet.share && sheet.share.gistId ? shareUrl(sheet.share.gistId) : undefined, sheetBody) }, '코코포리아로 복사'));
       sheetArea.replaceChildren(...[
         !editing ? null : h('div', { class: 'sheet-actions row' },
-          editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '룰 틀 편집') : null,
+          editing ? h('a', { class: 'button-link', href: `#/template/${encodeURIComponent(key)}` }, '템플릿 편집') : null,
           editing ? h('button', { class: 'danger ghost', onclick: e => removeSheet(e.target) }, '이 룰 시트 삭제') : null),
         sheetBody = renderSheet(template, fillDefaults(template, sheet),
           { readonly: !editing, onChange: markDirty, accent: themeOf(char.colors, char.theme).accent, datasets })].filter(Boolean));
@@ -1056,7 +1108,7 @@
         templates = t2; datasets = d2;
         if (sig() !== before && document.body.contains(head)) {
           drawTabs(); drawSheet();
-          toast('룰 틀이 바뀌어서 새 내용으로 다시 그렸어요.');
+          toast('템플릿이 바뀌어서 새 내용으로 다시 그렸어요.');
         }
       } catch { /* 연결이 잠깐 안 되면 다음에 다시 */ }
       checking = false;
@@ -1216,7 +1268,7 @@
           return el;
         }
         if ((link && c.from && c !== link.keyCol && link.find(row[link.keyCol.id])) || (readonly && c.type === 'textarea')) {
-          return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터 보관함에서 불러온 값' : '' }, String(row[c.id] ?? ''));
+          return h('div', { class: 'linked-cell' + (link && c.from ? ' is-linked' : ''), title: link && c.from ? '데이터에서 불러온 값' : '' }, String(row[c.id] ?? ''));
         }
         if (c.type === 'select') {
           // 선택 목록 열: 고르기만 하면 됨 (선택지에 없는 예전 값도 그대로 보여 줌)
@@ -1423,6 +1475,151 @@
     return root;
   }
 
+  // ---------------- 목록 화면 공통: 카드 크기 · 정렬 · 꾹 눌러서 직접 배치 ----------------
+  // 카드 크기·정렬 방식은 이 브라우저에, 직접 배치한 순서는 데이터 저장소(meta/order.json)에 저장 → 다른 기기에서도 같은 순서
+  const LIST_KEY = 'trpg-list-view';
+  const CARD_SIZES = [['s', '작게'], ['m', '보통'], ['l', '크게']];
+  function listPrefs(kind, defSort) {
+    let all = {};
+    try { all = JSON.parse(localStorage.getItem(LIST_KEY)) || {}; } catch {}
+    return { size: 'm', sort: defSort || 'custom', ...(all[kind] || {}) };
+  }
+  function saveListPrefs(kind, p) {
+    try {
+      const all = JSON.parse(localStorage.getItem(LIST_KEY) || '{}') || {};
+      all[kind] = p; localStorage.setItem(LIST_KEY, JSON.stringify(all));
+    } catch {}
+  }
+  const ORDER_PATH = 'meta/order.json';
+  let orderState = { data: {}, sha: null };
+  async function loadOrder() {
+    try { orderState = await readJson(ORDER_PATH); if (!orderState.data || typeof orderState.data !== 'object') orderState.data = {}; }
+    catch (e) { if (e.status !== 404) console.warn(e); orderState = { data: {}, sha: null }; }
+    return orderState.data;
+  }
+  async function saveOrder(kind, keys) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const data = { ...orderState.data, [kind]: keys };
+        orderState = { data, sha: await writeJson(ORDER_PATH, data, orderState.sha, `순서 바꾸기: ${kind}`) };
+        return;
+      } catch (e) {
+        if (i === 0 && (e.status === 409 || e.status === 422)) { // 다른 기기에서 먼저 고쳤으면 새로 읽고 한 번 더
+          try { orderState = await readJson(ORDER_PATH); } catch { orderState = { data: {}, sha: null }; }
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+  // 저장된 순서대로 정렬. 순서에 없는 새 항목은 맨 앞(newFirst) 또는 맨 뒤
+  function applyOrder(keys, saved, newFirst) {
+    const pos = new Map((saved || []).map((k, i) => [k, i]));
+    const known = keys.filter(k => pos.has(k)).sort((a, b) => pos.get(a) - pos.get(b));
+    const fresh = keys.filter(k => !pos.has(k));
+    return newFirst ? [...fresh, ...known] : [...known, ...fresh];
+  }
+  // 필터로 일부만 보일 때: 보이는 항목들의 자리만 새 순서로 바꿈
+  function mergeVisible(full, visible) {
+    const set = new Set(visible); let i = 0;
+    return full.map(k => (set.has(k) ? visible[i++] : k));
+  }
+  const byName = (a, b) => String(a || '').localeCompare(String(b || ''), 'ko', { numeric: true });
+
+  // 정렬 · 카드 크기 고르는 줄 (필터 막대 안에 들어감)
+  function listTools(prefs, sorts, onChange) {
+    const chip = (on, label, click) => h('button', { type: 'button', class: 'filter-chip' + (on ? ' on' : ''), onclick: click }, label);
+    return [
+      h('div', { class: 'filter-group' }, h('span', { class: 'filter-label' }, '정렬'),
+        sorts.map(([id, label]) => chip(prefs.sort === id, label, () => { prefs.sort = id; onChange(); }))),
+      h('div', { class: 'filter-group' }, h('span', { class: 'filter-label' }, '카드 크기'),
+        CARD_SIZES.map(([id, label]) => chip(prefs.size === id, label, () => { prefs.size = id; onChange(); }))),
+    ];
+  }
+
+  // 카드를 꾹 눌러서(0.4초) 끌어다 놓기. 카드마다 data-key가 있어야 함. onDrop(새 순서의 키 배열)
+  function sortableCards(container, onDrop) {
+    container.classList.add('sortable-cards');
+    for (const card of container.children) if (card.dataset && card.dataset.key) armCard(card);
+    function armCard(card) {
+      card.addEventListener('dragstart', e => e.preventDefault()); // 링크·그림 기본 끌기 막기
+      card.addEventListener('contextmenu', e => { if (card._pressing || document.body.classList.contains('dragging')) e.preventDefault(); });
+      card.addEventListener('pointerdown', e => {
+        if (e.button !== 0 || e.target.closest('button, input, select, textarea')) return;
+        const sx = e.clientX, sy = e.clientY;
+        card._pressing = true;
+        let timer = setTimeout(() => { timer = null; done(); beginDrag(card, sx, sy); }, 400);
+        const move = ev => { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) done(); };
+        function done() {
+          if (timer) clearTimeout(timer);
+          timer = null; card._pressing = false;
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', done);
+          window.removeEventListener('pointercancel', done);
+        }
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', done);
+        window.addEventListener('pointercancel', done);
+      });
+    }
+    function beginDrag(card, x0, y0) {
+      const before = [...container.children].map(c => c.dataset.key).filter(Boolean);
+      const rect = card.getBoundingClientRect();
+      const ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost', 'card-ghost');
+      Object.assign(ghost.style, { width: rect.width + 'px', height: rect.height + 'px', left: rect.left + 'px', top: rect.top + 'px' });
+      document.body.append(ghost);
+      card.classList.add('drag-source');
+      document.body.classList.add('dragging');
+      if (navigator.vibrate) try { navigator.vibrate(15); } catch {}
+      const dx = x0 - rect.left, dy = y0 - rect.top;
+      let lastX = x0, lastY = y0, raf = 0;
+      const blockTouch = ev => ev.preventDefault(); // 끄는 동안 화면이 같이 스크롤되지 않게
+      document.addEventListener('touchmove', blockTouch, { passive: false });
+      function place() {
+        ghost.style.left = (lastX - dx) + 'px';
+        ghost.style.top = (lastY - dy) + 'px';
+        const el = document.elementFromPoint(lastX, lastY);
+        const over = el && el.closest('[data-key]');
+        if (!over || over === card || over.parentElement !== container) return;
+        const r = over.getBoundingClientRect();
+        const oneCol = getComputedStyle(container).gridTemplateColumns.split(' ').filter(Boolean).length <= 1;
+        const first = oneCol ? lastY < r.top + r.height / 2 : lastX < r.left + r.width / 2;
+        const ref = first ? over : over.nextSibling;
+        if (ref !== card && card.nextSibling !== ref) container.insertBefore(card, ref);
+        else if (ref === null && container.lastChild !== card) container.append(card);
+      }
+      function edgeScroll() {
+        const edge = 70, wh = window.innerHeight;
+        const speed = lastY < edge ? -Math.ceil((edge - lastY) / 4) : lastY > wh - edge ? Math.ceil((lastY - (wh - edge)) / 4) : 0;
+        if (speed) { window.scrollBy(0, speed); place(); }
+        raf = requestAnimationFrame(edgeScroll);
+      }
+      raf = requestAnimationFrame(edgeScroll);
+      const onMove = ev => { lastX = ev.clientX; lastY = ev.clientY; place(); };
+      function end() {
+        cancelAnimationFrame(raf);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        document.removeEventListener('touchmove', blockTouch);
+        ghost.remove();
+        card.classList.remove('drag-source');
+        document.body.classList.remove('dragging');
+        // 끌고 난 뒤 바로 따라오는 클릭(카드 열기)은 무시
+        const eat = ev => { ev.preventDefault(); ev.stopPropagation(); };
+        window.addEventListener('click', eat, true);
+        setTimeout(() => window.removeEventListener('click', eat, true), 350);
+        const after = [...container.children].map(c => c.dataset.key).filter(Boolean);
+        if (after.join('\u0000') !== before.join('\u0000')) onDrop(after);
+      }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    }
+    return container;
+  }
+
   // ---------------- 끌어서 순서 바꾸기 (룰 틀 편집기·데이터 보관함 공통) ----------------
   // dropList(요소, 배열, 묶음키): 이 요소 안의 .drag-item들이 배열의 순서를 나타냄. 묶음키가 같은 목록끼리만 옮길 수 있음
   // draggable(요소, 객체, { onMoved, canMove, ghost }): ⠿ 손잡이 또는 빈 곳을 꾹 눌러 끌기
@@ -1533,6 +1730,7 @@
     resetTemplates: () => { templateCache = null; },
     renderSheet, blankSheet, charactersUsing, loadDatasets, refreshShares, autoGrow,
     dragHandle, dropList, draggable,
+    listPrefs, saveListPrefs, loadOrder, saveOrder, applyOrder, mergeVisible, byName, listTools, sortableCards,
     resetDatasets: () => { datasetCache = null; },
     fileKey: rule => String(rule || '').trim().replace(/[\\/:*?"<>|#%&\s]+/g, '-').replace(/^-+|-+$/g, '') || 'data',
   };
